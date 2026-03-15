@@ -37,6 +37,26 @@ It is no longer anchored to `hello-world-nextjs` as the source-of-truth.
 
 - `<next-app>/logs/vnc-click-events.jsonl`
 
+## Automated regression script
+
+Run the full 22-button sweep with:
+
+```bash
+python3 scripts/click-regression.py \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+```
+
+What it does:
+- computes deterministic button centers from the lab grid
+- clicks each button via the VNC bridge
+- verifies backend JSONL recorded the expected `button_click` label
+- retries with small jitter offsets if needed
+- exits non-zero on failures
+
+Geometry can be overridden for different window/viewport calibrations:
+`--section-left --section-top --section-width --section-height`.
+
 ## Regression intent
 
 This lab is the canonical surface for:

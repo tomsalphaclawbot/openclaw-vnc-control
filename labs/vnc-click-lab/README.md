@@ -48,6 +48,18 @@ Logs are written to:
 
 - `<next-app>/logs/vnc-click-events.jsonl`
 
+## Automated button sweep
+
+Use the project-level runner:
+
+```bash
+python3 scripts/click-regression.py \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+```
+
+This validates all 22 buttons and exits non-zero on any mismatch.
+
 ## Notes
 
 - The button layout is deterministic to make click regression reproducible.

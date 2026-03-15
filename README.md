@@ -180,6 +180,7 @@ The canonical click/typing/key test lab now lives in this repo:
 
 - `labs/vnc-click-lab/`
 - [docs/VNC_CLICK_LAB.md](./docs/VNC_CLICK_LAB.md)
+- `scripts/click-regression.py` (automated 22-button sweep validator)
 
 Use it to run repeatable VNC regression checks against button clicks, field focus/typing, and key handling.
 
