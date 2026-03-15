@@ -86,21 +86,69 @@ def get_image_info(path):
     return info
 
 
+def convert_screenshot(png_path, out_path, fmt="png", scale=None, quality=80):
+    """Convert/resize a screenshot. Returns final path and image info."""
+    from PIL import Image
+    img = Image.open(png_path)
+
+    if scale and 0 < scale < 1.0:
+        new_w = int(img.width * scale)
+        new_h = int(img.height * scale)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+
+    if fmt == "jpeg" or fmt == "jpg":
+        # Ensure no alpha channel for JPEG
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGB")
+        if out_path.endswith(".png"):
+            out_path = out_path.rsplit(".", 1)[0] + ".jpg"
+        img.save(out_path, "JPEG", quality=quality)
+    else:
+        img.save(out_path, "PNG")
+
+    img.close()
+
+    # Remove the raw PNG if we wrote to a different path
+    if os.path.abspath(png_path) != os.path.abspath(out_path):
+        try:
+            os.unlink(png_path)
+        except OSError:
+            pass
+
+    return out_path
+
+
 def cmd_screenshot(args, config):
     """Capture a screenshot."""
+    fmt = getattr(args, "format", "png") or "png"
+    scale = getattr(args, "scale", None)
+    quality = getattr(args, "quality", 80) or 80
+
     out_path = args.out
     if not out_path:
         ts = int(time.time())
         out_dir = Path(tempfile.gettempdir()) / "vnc-control"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = str(out_dir / f"screenshot-{ts}.png")
+        ext = "jpg" if fmt in ("jpeg", "jpg") else "png"
+        out_path = str(out_dir / f"screenshot-{ts}.{ext}")
     else:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
 
-    actions = ["--nocursor", "capture", out_path] if args.no_cursor else ["capture", out_path]
+    # vncdotool always captures PNG — we convert after if needed
+    raw_png = out_path
+    if fmt in ("jpeg", "jpg") or scale:
+        raw_png = str(Path(tempfile.gettempdir()) / "vnc-control" / f".raw-{int(time.time())}.png")
+        Path(raw_png).parent.mkdir(parents=True, exist_ok=True)
+
+    actions = ["--nocursor", "capture", raw_png] if getattr(args, "no_cursor", False) else ["capture", raw_png]
 
     ok, stdout, stderr, duration = run_vncdo(config, actions)
-    if ok and os.path.exists(out_path):
+    if ok and os.path.exists(raw_png):
+        # Convert if needed
+        if fmt in ("jpeg", "jpg") or scale:
+            out_path = convert_screenshot(raw_png, out_path, fmt=fmt, scale=scale, quality=quality)
+            duration = round(time.time() - (time.time() - duration), 2)  # keep original timing
+
         img_info = get_image_info(out_path)
         result_json(True, {
             "action": "screenshot",
@@ -280,6 +328,11 @@ def main():
     p_ss = sub.add_parser("screenshot", help="Capture screenshot")
     p_ss.add_argument("--out", help="Output file path (default: auto-generated)")
     p_ss.add_argument("--no-cursor", action="store_true", help="Hide cursor in capture")
+    p_ss.add_argument("--format", choices=["png", "jpeg", "jpg"], default="png",
+                       help="Output format (default: png)")
+    p_ss.add_argument("--scale", type=float, help="Scale factor 0-1 (e.g., 0.5 = half size)")
+    p_ss.add_argument("--quality", type=int, default=80,
+                       help="JPEG quality 1-100 (default: 80)")
 
     # click
     p_click = sub.add_parser("click", help="Click at coordinates")
