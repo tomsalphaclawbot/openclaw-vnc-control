@@ -70,6 +70,14 @@ What it validates:
 - `agent_text_field` receives multiline text with Enter line breaks
 - special keys + modifiers generate expected `field_keydown` events (Enter, Tab, Escape, Backspace, Delete, arrows, Shift/Meta/Control)
 
+Run both regressions in one command:
+
+```bash
+scripts/run-all-regressions.sh \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+```
+
 ## Regression intent
 
 This lab is the canonical surface for:

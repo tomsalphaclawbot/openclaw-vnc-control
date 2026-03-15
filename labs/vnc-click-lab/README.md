@@ -68,6 +68,14 @@ python3 scripts/input-key-regression.py \
   --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
 ```
 
+Run both in one shot:
+
+```bash
+scripts/run-all-regressions.sh \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+```
+
 ## Notes
 
 - The button layout is deterministic to make click regression reproducible.
