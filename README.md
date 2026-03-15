@@ -17,6 +17,11 @@ This project is intentionally built as a **drive-by-wire CLI** for AI agents:
 - AI agent decides what to do next
 - CLI executes deterministic control commands against the VNC session
 
+## Scope guardrails (v1)
+- Single VNC host only (no multi-host inventory/fleet management)
+- Credentials come from CLI args or environment variables
+- This tool is a bridge, not a full remote-desktop platform
+
 ## Planning docs
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [ROADMAP.md](./ROADMAP.md)

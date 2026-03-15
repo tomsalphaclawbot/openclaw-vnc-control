@@ -12,6 +12,8 @@ Deliverables:
 ## Phase 1 — Control Primitives MVP
 Goal: reliable core operations from a drive-by-wire CLI.
 
+Scope lock (v1): single VNC target, credentials via args/env, bridge-only behavior.
+
 Deliverables:
 - [ ] Connect/auth to VNC host
 - [ ] Capture screenshot (observation command)

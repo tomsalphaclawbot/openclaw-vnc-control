@@ -13,6 +13,7 @@ Status legend: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 - [TODO] Add contribution and license files
 
 ## Sprint B — Technical Spike (48h)
+- [DONE] Lock scope: single-host bridge model + credentials via args/env
 - [IN_PROGRESS] Evaluate candidate VNC libraries (3 max)
 - [TODO] Build minimal proof of connect + screenshot for top candidate
 - [TODO] Capture benchmark notes (latency, stability, maintenance health)

@@ -100,6 +100,12 @@ The system should support a simple agent loop:
 - `disconnect`
 - `status`
 
+### Global connection inputs (v1)
+- CLI args: `--host`, `--port`, `--password`
+- Env fallback: `VNC_HOST`, `VNC_PORT`, `VNC_PASSWORD`
+- Precedence: CLI args override env vars
+- No persisted credential store in v1
+
 ### Screen
 - `screenshot --out <path> [--crop x,y,w,h]`
 - `observe --out <path>` (alias/shortcut optimized for agent loops)
