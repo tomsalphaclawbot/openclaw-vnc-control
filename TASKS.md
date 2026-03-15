@@ -50,11 +50,13 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
   - **Root cause hypothesis**: macOS ARD lock→desktop transition doesn't produce expected VNC framebuffer response, causing vncdo to block
 - [TODO] Lock detection from screenshot signature
 - [TODO] Auto-unlock macro with retry logic
-- [DONE] macOS screen lock timer fixed: screensaver idle 1800s, password delay 1800s, display sleep 0 on AC
+- [DONE] macOS lock behavior tuned for VNC stability
   - `defaults -currentHost write com.apple.screensaver idleTime -int 1800`
   - `defaults write com.apple.screensaver askForPasswordDelay -int 1800`
   - Battery `displaysleep 2` still needs sudo to change; AC `displaysleep 0` is already correct
   - Hot corners all disabled (tl=1, bl=1, br=1)
+  - Tom-confirmed root cause: Lock Screen policy was set to **"Require password ... After 2 seconds"**, causing fast relock when display sleep/screensaver triggered during VNC disconnects/transitions
+  - Tom changed this policy to **1 hour** in System Settings (verified)
   - Node TCC permissions dialog dismissed via VNC click
 
 ## Sprint E — Skill Package ✅ DONE
@@ -77,7 +79,7 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 | # | Issue | Severity | Status |
 |---|-------|----------|--------|
 | 1 | `key escape` times out on macOS ARD | Low | Documented, workaround in place |
-| 2 | macOS auto-locks in ~1-2 min | High | **FIXED** — screensaver idle 1800s + password delay 1800s + display sleep 0 on AC |
+| 2 | macOS auto-locks in ~1-2 min | High | **FIXED** — root cause was Lock Screen "Require password" set to 2s; changed to 1h + screensaver/pmset tuning |
 | 3 | `key return` unreliable for lock screen submit | High | IN_PROGRESS |
 | 4 | `!` char in `type` may encode wrong | Medium | Use `--force-caps` or `key shift-1` |
 | 5 | Daemon keepalive hit hot corner causing lock | Critical | **FIXED** — center jiggle + hot corner disabled |
