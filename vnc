@@ -1,0 +1,8 @@
+#!/bin/bash
+# vnc — one-liner VNC control from anywhere
+# Resolves real path through symlinks to find vnc-session.py
+REAL="$(readlink -f "$0" 2>/dev/null || python3 -c "import os;print(os.path.realpath('$0'))")"
+DIR="$(dirname "$REAL")"
+VENV="$DIR/.venv/bin/python3"
+[ -x "$VENV" ] || VENV=python3
+exec "$VENV" "$DIR/vnc-session.py" "$@"
