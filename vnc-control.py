@@ -6,7 +6,7 @@ Core design principle: AI vision models analyze screenshots and return coordinat
 in SCREENSHOT space. This tool auto-converts to native VNC coordinates.
 
 Usage:
-    vnc-control screenshot [--out FILE] [--format jpeg] [--scale 0.5]
+    vnc-control --profile ai screenshot [--out FILE]
     vnc-control click X Y [--space screenshot|native|normalized]
     vnc-control move X Y [--space screenshot|native|normalized]
     vnc-control type TEXT
@@ -41,6 +41,12 @@ from pathlib import Path
 DEFAULT_SCALE = 0.5
 DEFAULT_FORMAT = "jpeg"
 DEFAULT_QUALITY = 80
+DEFAULT_PROFILE = "manual"
+AI_PROFILE_DEFAULTS = {
+    "format": "jpeg",
+    "scale": 0.5,
+    "quality": 70,
+}
 VNCDO_TIMEOUT = 12  # vncdo internal timeout (seconds)
 SUBPROCESS_TIMEOUT = 18  # subprocess kill timeout
 NATIVE_WIDTH = None  # auto-detected on first connect
@@ -183,6 +189,48 @@ def infer_screenshot_scale(arg_scale):
         return float(state["scale"])
     return DEFAULT_SCALE
 
+
+def get_profile(args):
+    return getattr(args, "profile", None) or os.environ.get("VNC_PROFILE", DEFAULT_PROFILE)
+
+
+def capture_settings(args, prefer_last_scale=False):
+    """Resolve capture format/scale/quality from profile + args.
+
+    AI profile is intentionally constrained to efficient capture defaults to avoid
+    oversized screenshots in agent loops.
+    """
+    profile = get_profile(args)
+
+    fmt = getattr(args, "format", None)
+    scale = getattr(args, "scale", None)
+    quality = getattr(args, "quality", None)
+
+    if fmt is None:
+        fmt = AI_PROFILE_DEFAULTS["format"] if profile == "ai" else DEFAULT_FORMAT
+    if scale is None:
+        if profile == "ai":
+            scale = AI_PROFILE_DEFAULTS["scale"]
+        elif prefer_last_scale:
+            scale = infer_screenshot_scale(None)
+        else:
+            scale = DEFAULT_SCALE
+    if quality is None:
+        quality = AI_PROFILE_DEFAULTS["quality"] if profile == "ai" else DEFAULT_QUALITY
+
+    # Hard efficiency guardrails for AI profile
+    if profile == "ai":
+        if fmt == "png":
+            fmt = "jpeg"
+        if scale <= 0 or scale > 0.6:
+            scale = AI_PROFILE_DEFAULTS["scale"]
+        if quality < 40:
+            quality = 40
+        if quality > 85:
+            quality = 85
+
+    return profile, fmt, scale, quality
+
 # ─── Coordinate conversion ────────────────────────────────────────────────────
 
 def detect_native_resolution(config):
@@ -307,11 +355,7 @@ def tmpfile(prefix, ext="png"):
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
 def cmd_screenshot(args, config):
-    fmt = getattr(args, "format", DEFAULT_FORMAT) or DEFAULT_FORMAT
-    scale = getattr(args, "scale", DEFAULT_SCALE)
-    if scale is None:
-        scale = DEFAULT_SCALE
-    quality = getattr(args, "quality", DEFAULT_QUALITY) or DEFAULT_QUALITY
+    profile, fmt, scale, quality = capture_settings(args)
 
     out_path = args.out
     if not out_path:
@@ -359,6 +403,7 @@ def cmd_screenshot(args, config):
 
         result_json(True, {
             "action": "screenshot",
+            "profile": profile,
             "image": img_info,
             "sha1": image_hash,
             "unchanged_from_previous": unchanged,
@@ -395,8 +440,10 @@ def cmd_click(args, config):
 
     ok, _, stderr, duration = run_vncdo(config, actions)
 
+    profile = get_profile(args)
     data = {
         "action": "click",
+        "profile": profile,
         "input_coords": {"space": space, "x": args.x, "y": args.y},
         "native_coords": {"x": nx, "y": ny},
         "native_resolution": {"w": native_w, "h": native_h},
@@ -407,13 +454,13 @@ def cmd_click(args, config):
     }
 
     if os.path.exists(verify_png):
-        # Convert verify screenshot to match the active screenshot-space scale
-        fmt = DEFAULT_FORMAT
-        quality = DEFAULT_QUALITY
-        s = used_scale if used_scale else DEFAULT_SCALE
+        # Convert verify screenshot using active profile defaults
+        _, fmt, default_scale, quality = capture_settings(args, prefer_last_scale=True)
+        s = used_scale if used_scale else default_scale
         out = tmpfile("verify-click", "jpg" if fmt in ("jpeg", "jpg") else "png")
         out = convert_screenshot(verify_png, out, fmt=fmt, scale=s, quality=quality)
         data["verify_image"] = get_image_info(out)
+        data["profile"] = profile
 
     if ok:
         result_json(True, data)
@@ -440,6 +487,7 @@ def cmd_move(args, config):
     if ok:
         result_json(True, {
             "action": "move",
+            "profile": get_profile(args),
             "input_coords": {"space": space, "x": args.x, "y": args.y},
             "native_coords": {"x": nx, "y": ny},
             "native_resolution": {"w": native_w, "h": native_h},
@@ -522,9 +570,7 @@ def cmd_combo(args, config):
     Coordinates are in screenshot space by default (auto-converted).
     Appends a verify screenshot automatically.
     """
-    scale = infer_screenshot_scale(getattr(args, "scale", None))
-    fmt = getattr(args, "format", DEFAULT_FORMAT) or DEFAULT_FORMAT
-    quality = getattr(args, "quality", DEFAULT_QUALITY) or DEFAULT_QUALITY
+    profile, fmt, scale, quality = capture_settings(args, prefer_last_scale=True)
     native_mode = getattr(args, "native", False)
     input_space = "native" if native_mode else getattr(args, "space", "screenshot")
 
@@ -572,6 +618,7 @@ def cmd_combo(args, config):
     if ok:
         result_json(True, {
             "action": "combo",
+            "profile": profile,
             "steps": len(raw_steps),
             "input_space": input_space,
             "screenshot_scale_used": scale,
@@ -613,9 +660,11 @@ def cmd_connect(args, config):
         except OSError:
             pass
 
-        scale = DEFAULT_SCALE
+        profile = get_profile(args)
+        scale = AI_PROFILE_DEFAULTS["scale"] if profile == "ai" else DEFAULT_SCALE
         result_json(True, {
             "action": "connect",
+            "profile": profile,
             "host": config["host"],
             "port": config["port"],
             "native_resolution": {"w": w, "h": h},
@@ -667,6 +716,8 @@ def main():
     parser.add_argument("--port", help="VNC port (default: $VNC_PORT or 5900)")
     parser.add_argument("--password", help="VNC password (default: $VNC_PASSWORD)")
     parser.add_argument("--username", help="VNC/ARD username (default: $VNC_USERNAME)")
+    parser.add_argument("--profile", choices=["manual", "ai"], default=os.environ.get("VNC_PROFILE", DEFAULT_PROFILE),
+                        help="Behavior profile: manual (flexible) or ai (efficiency-locked)")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -674,10 +725,12 @@ def main():
     p = sub.add_parser("screenshot", help="Capture screenshot")
     p.add_argument("--out", help="Output path (default: auto)")
     p.add_argument("--no-cursor", action="store_true")
-    p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=DEFAULT_FORMAT)
-    p.add_argument("--scale", type=float, default=DEFAULT_SCALE,
-                   help=f"Scale 0-1 (default: {DEFAULT_SCALE})")
-    p.add_argument("--quality", type=int, default=DEFAULT_QUALITY)
+    p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None,
+                   help="Image format (auto by profile when omitted)")
+    p.add_argument("--scale", type=float, default=None,
+                   help="Scale 0-1 (auto by profile when omitted)")
+    p.add_argument("--quality", type=int, default=None,
+                   help="JPEG quality (auto by profile when omitted)")
 
     # click - coords in screenshot space by default
     p = sub.add_parser("click", help="Click at coordinates")
@@ -715,10 +768,12 @@ def main():
     p.add_argument("--space", choices=["screenshot", "native", "normalized"], default="screenshot",
                    help="Coordinate space for move steps (default: screenshot)")
     p.add_argument("--native", action="store_true", help="Alias for --space native")
-    p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=DEFAULT_FORMAT)
+    p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None,
+                   help="Verify image format (auto by profile when omitted)")
     p.add_argument("--scale", type=float, default=None,
-                   help="Screenshot scale used by coordinates (auto-detected from last screenshot if omitted)")
-    p.add_argument("--quality", type=int, default=DEFAULT_QUALITY)
+                   help="Screenshot scale used by coordinates (auto-detected/profile default when omitted)")
+    p.add_argument("--quality", type=int, default=None,
+                   help="Verify image quality (auto by profile when omitted)")
 
     # map
     p = sub.add_parser("map", help="Convert coordinates between spaces")

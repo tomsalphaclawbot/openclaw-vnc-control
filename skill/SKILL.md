@@ -42,6 +42,13 @@ export VNC_USERNAME=youruser  # required for macOS ARD
 
 Or pass as CLI args (`--host`, `--port`, `--password`, `--username`). Args override env.
 
+## Efficiency profile for agents
+
+Use `--profile ai` on commands to hard-lock efficient defaults and avoid oversized image payloads:
+- format forced to JPEG
+- scale constrained to <= 0.6 (default 0.5)
+- quality clamped to 40..85 (default 70)
+
 ## Agent Loop
 
 The core workflow for visual desktop automation:
@@ -55,17 +62,17 @@ The core workflow for visual desktop automation:
 ### Step-by-step example
 
 ```bash
-TOOL="python3 vnc-control.py"
+TOOL="python3 vnc-control.py --profile ai"
 
 # 1. Check connection
 $TOOL status
 
-# 2. Capture screen (JPEG at 50% for fast AI analysis)
-$TOOL screenshot --format jpeg --scale 0.5 --out /tmp/screen.jpg
+# 2. Capture screen (efficient defaults in ai profile)
+$TOOL screenshot --out /tmp/screen.jpg
 
 # 3. [Feed /tmp/screen.jpg to vision model, get coordinates]
 
-# 4. Click where the model says
+# 4. Click where the model says (screenshot-space coords by default)
 $TOOL click 540 380
 
 # 5. Type into the focused field
@@ -75,7 +82,7 @@ $TOOL type "hello world"
 $TOOL key enter
 
 # 7. Verify with another screenshot
-$TOOL screenshot --format jpeg --scale 0.5 --out /tmp/verify.jpg
+$TOOL screenshot --out /tmp/verify.jpg
 ```
 
 ## Commands
@@ -84,13 +91,14 @@ All commands return JSON with `"ok": true/false` and action metadata.
 
 | Command | Usage | Notes |
 |---------|-------|-------|
-| `status` | `vnc-control.py status` | TCP probe + RFB banner check |
-| `connect` | `vnc-control.py connect` | Full auth test, returns screen dimensions |
-| `screenshot` | `vnc-control.py screenshot [--out FILE] [--format png\|jpeg] [--scale 0.5] [--quality 80]` | Capture framebuffer |
-| `click` | `vnc-control.py click X Y [--button left\|right] [--double]` | Click + auto-verify screenshot |
-| `move` | `vnc-control.py move X Y` | Move pointer |
-| `type` | `vnc-control.py type "text"` | Type text string |
-| `key` | `vnc-control.py key KEY` | Send special key (enter, tab, ctrl-c, etc.) |
+| `status` | `vnc-control.py [--profile ai] status` | TCP probe + RFB banner check |
+| `connect` | `vnc-control.py [--profile ai] connect` | Full auth test, returns screen dimensions |
+| `screenshot` | `vnc-control.py [--profile ai] screenshot [--out FILE] [--format png\|jpeg] [--scale 0.5] [--quality 80]` | Capture framebuffer |
+| `click` | `vnc-control.py [--profile ai] click X Y [--space screenshot\|native\|normalized] [--button left\|right] [--double]` | Click + auto-verify screenshot |
+| `move` | `vnc-control.py [--profile ai] move X Y [--space screenshot\|native\|normalized]` | Move pointer |
+| `map` | `vnc-control.py map X Y --from screenshot --to native` | Convert coords programmatically |
+| `type` | `vnc-control.py [--profile ai] type "text"` | Type text string |
+| `key` | `vnc-control.py [--profile ai] key KEY` | Send special key (enter, tab, ctrl-c, etc.) |
 
 ## Screenshot sizing guide
 
@@ -109,7 +117,8 @@ Prefer `--format jpeg --scale 0.5` for agent loops — all text and UI elements 
 - `key escape` may timeout on macOS ARD — all other keys work reliably
 - Each command opens a new VNC connection (no persistent session yet)
 - Click automatically captures a verification screenshot (returned in JSON as `verify_image`)
-- Screen coordinates are in native resolution (check `connect` output for `screen_width`/`screen_height`)
+- Default coordinate input space is **screenshot space**; translation to native is automatic.
+- For agent runs, prefer `--profile ai` for efficient capture defaults and constrained image sizes.
 
 ## Troubleshooting
 

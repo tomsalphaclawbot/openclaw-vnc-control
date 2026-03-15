@@ -46,8 +46,9 @@ vnc key return         # send key
 vnc stop               # stop daemon
 
 # Or v1 standalone (no daemon needed)
-python3 vnc-control.py screenshot --format jpeg --scale 0.5
-python3 vnc-control.py click 1000 600
+python3 vnc-control.py --profile ai screenshot          # efficient defaults locked (jpeg, 0.5, q70)
+python3 vnc-control.py --profile ai click 1000 600     # screenshot-space by default
+python3 vnc-control.py map 1000 600 --from screenshot --to native
 ```
 
 ## Connection Config
@@ -63,6 +64,24 @@ VNC_PASSWORD=yourpass
 
 # Or CLI args (v1 only):
 python3 vnc-control.py --host 127.0.0.1 --port 5900 --username user --password pass screenshot
+```
+
+## v1 AI Profile (efficiency mode)
+
+Use `--profile ai` to hard-lock efficient capture defaults and avoid oversized images:
+
+- format forced to JPEG (PNG requests are normalized to JPEG)
+- scale constrained to <= 0.6 (defaults to 0.5)
+- quality clamped to 40..85 (defaults to 70)
+- coordinate translation remains automatic (`screenshot` / `native` / `normalized` spaces)
+
+Examples:
+
+```bash
+python3 vnc-control.py --profile ai screenshot
+python3 vnc-control.py --profile ai click 640 420 --space screenshot
+python3 vnc-control.py --profile ai click 0.5 0.38 --space normalized
+python3 vnc-control.py map 640 420 --from screenshot --to native
 ```
 
 ## v2 Daemon Commands (`vnc`)
