@@ -7,6 +7,18 @@ description: Control remote desktops via VNC for AI agent visual automation. Use
 
 Visual bridge for AI agents to control remote desktops via VNC. The tool captures screenshots and relays pointer/keyboard input — all intelligence lives in your vision analysis of the images.
 
+## Mandatory preflight (operator visibility)
+
+Before **any** VNC bridge command (`vnc-control.py` or `vncdo`), post a one-line preflight in the conversation first.
+
+Required format:
+- `Objective: <what this next VNC command is trying to accomplish>`
+
+Rules:
+- Do not run VNC commands without a preflight objective posted first.
+- If the objective changes, post a new objective before the next VNC command.
+- If 2 attempts fail on the same objective, post a blocker update before trying again.
+
 ## Setup
 
 ```bash
