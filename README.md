@@ -105,6 +105,17 @@ All commands return JSON:
 - CLI-first
 - This is a bridge, not a platform
 
+## For AI agents
+
+This project includes a ready-to-use [OpenClaw/AgentSkill](./skill/SKILL.md). Any AI agent can:
+
+1. Clone this repo
+2. Run `skill/scripts/install.sh` (sets up Python venv + dependencies)
+3. Read `skill/SKILL.md` for full usage instructions
+4. Start the observe→decide→act→verify loop
+
+The skill provides everything an agent needs to control a VNC desktop without prior knowledge of VNC protocols.
+
 ## Docs
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
