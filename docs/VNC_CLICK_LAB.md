@@ -57,6 +57,19 @@ What it does:
 Geometry can be overridden for different window/viewport calibrations:
 `--section-left --section-top --section-width --section-height`.
 
+Run field + keystroke regression with:
+
+```bash
+python3 scripts/input-key-regression.py \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+```
+
+What it validates:
+- `agent_input` receives typed text and logs `field_input`
+- `agent_text_field` receives multiline text with Enter line breaks
+- special keys + modifiers generate expected `field_keydown` events (Enter, Tab, Escape, Backspace, Delete, arrows, Shift/Meta/Control)
+
 ## Regression intent
 
 This lab is the canonical surface for:

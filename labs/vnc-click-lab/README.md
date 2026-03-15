@@ -60,6 +60,14 @@ python3 scripts/click-regression.py \
 
 This validates all 22 buttons and exits non-zero on any mismatch.
 
+For text fields + key coverage:
+
+```bash
+python3 scripts/input-key-regression.py \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+```
+
 ## Notes
 
 - The button layout is deterministic to make click regression reproducible.
