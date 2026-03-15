@@ -174,8 +174,18 @@ This project includes a ready-to-use [OpenClaw/AgentSkill](./skill/SKILL.md). An
 3. Read `skill/SKILL.md` for full usage instructions
 4. Start the observe→decide→act→verify loop
 
+## Click Accuracy Lab (now project-local)
+
+The canonical click/typing/key test lab now lives in this repo:
+
+- `labs/vnc-click-lab/`
+- [docs/VNC_CLICK_LAB.md](./docs/VNC_CLICK_LAB.md)
+
+Use it to run repeatable VNC regression checks against button clicks, field focus/typing, and key handling.
+
 ## Docs
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — design decisions and component model
 - [ROADMAP.md](./ROADMAP.md) — phased delivery plan
 - [TASKS.md](./TASKS.md) — current sprint status and known issues
+- [docs/VNC_CLICK_LAB.md](./docs/VNC_CLICK_LAB.md) — lab location, install flow, and regression intent
