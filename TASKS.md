@@ -2,6 +2,10 @@
 
 Status legend: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 
+## Coordination
+- Local workspace task id: `task-20260315-001` (tracked in `/tasks/ACTIVE.md`)
+- This file is the project-local execution board; workspace tasks track cross-project priorities/state.
+
 ## Sprint A — Groundwork
 - [DONE] Create project folder and public GitHub repo
 - [DONE] Add initial README
@@ -9,7 +13,7 @@ Status legend: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 - [TODO] Add contribution and license files
 
 ## Sprint B — Technical Spike (48h)
-- [TODO] Evaluate candidate VNC libraries (3 max)
+- [IN_PROGRESS] Evaluate candidate VNC libraries (3 max)
 - [TODO] Build minimal proof of connect + screenshot for top candidate
 - [TODO] Capture benchmark notes (latency, stability, maintenance health)
 - [TODO] Pick one library and record decision
