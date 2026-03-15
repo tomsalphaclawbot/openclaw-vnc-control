@@ -50,7 +50,12 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
   - **Root cause hypothesis**: macOS ARD lock→desktop transition doesn't produce expected VNC framebuffer response, causing vncdo to block
 - [TODO] Lock detection from screenshot signature
 - [TODO] Auto-unlock macro with retry logic
-- [TODO] Investigate disabling macOS auto-lock (no MDM/profiles, just system settings)
+- [DONE] macOS screen lock timer fixed: screensaver idle 1800s, password delay 1800s, display sleep 0 on AC
+  - `defaults -currentHost write com.apple.screensaver idleTime -int 1800`
+  - `defaults write com.apple.screensaver askForPasswordDelay -int 1800`
+  - Battery `displaysleep 2` still needs sudo to change; AC `displaysleep 0` is already correct
+  - Hot corners all disabled (tl=1, bl=1, br=1)
+  - Node TCC permissions dialog dismissed via VNC click
 
 ## Sprint E — Skill Package ✅ DONE
 - [DONE] `skill/SKILL.md` — OpenClaw AgentSkill format with YAML frontmatter
@@ -72,7 +77,7 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 | # | Issue | Severity | Status |
 |---|-------|----------|--------|
 | 1 | `key escape` times out on macOS ARD | Low | Documented, workaround in place |
-| 2 | macOS auto-locks in ~1-2 min | High | Keepalive helps, not fully solved |
+| 2 | macOS auto-locks in ~1-2 min | High | **FIXED** — screensaver idle 1800s + password delay 1800s + display sleep 0 on AC |
 | 3 | `key return` unreliable for lock screen submit | High | IN_PROGRESS |
 | 4 | `!` char in `type` may encode wrong | Medium | Use `--force-caps` or `key shift-1` |
 | 5 | Daemon keepalive hit hot corner causing lock | Critical | **FIXED** — center jiggle + hot corner disabled |
