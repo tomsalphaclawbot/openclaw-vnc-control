@@ -10,18 +10,19 @@ Deliverables:
 - [ ] Decision on VNC client library
 
 ## Phase 1 — Control Primitives MVP
-Goal: reliable core operations from CLI.
+Goal: reliable core operations from a drive-by-wire CLI.
 
 Deliverables:
 - [ ] Connect/auth to VNC host
-- [ ] Capture screenshot
+- [ ] Capture screenshot (observation command)
 - [ ] Move pointer
 - [ ] Click (single/double)
 - [ ] Structured JSON output for all commands
+- [ ] Artifact references in output (image paths + screen metadata)
 - [ ] Basic reconnect + timeout handling
 
 Exit criteria:
-- Can connect to a real VNC host and perform screenshot + click end-to-end.
+- Can connect to a real VNC host and perform observe -> act -> verify loop end-to-end.
 
 ## Phase 2 — Programmatic API
 Goal: expose primitives for agent/runtime integration.

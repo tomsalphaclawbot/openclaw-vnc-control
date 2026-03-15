@@ -1,13 +1,17 @@
 # openclaw-vnc-control — Architecture (Planning v0)
 
 ## Purpose
-Build a small, reliable control core for VNC sessions that supports:
+Build a small, reliable **drive-by-wire control core** for VNC sessions that supports:
 1. connect/authenticate
 2. screen capture
 3. pointer move
 4. click
 
 CLI-first implementation, then API wrapper.
+
+The operating model is explicit:
+- **CLI = actuator + sensor surface** (executes commands, returns observations)
+- **AI agent = decision layer** (interprets results, chooses next command)
 
 ---
 
@@ -63,10 +67,29 @@ Outputs:
 ### 5) Control Interfaces
 Responsibilities:
 - CLI commands for human/operator use
+- CLI contracts optimized for AI-agent planning loops
 - Local API (HTTP/WebSocket) for programmatic use (phase 2)
 
 Outputs:
-- JSON response envelopes and exit codes
+- JSON response envelopes, artifact paths, and exit codes
+
+---
+
+## Drive-by-Wire Interaction Contract
+
+The system should support a simple agent loop:
+1. `observe` (capture current screen + metadata)
+2. `decide` (external AI chooses next action)
+3. `act` (CLI executes pointer/click command)
+4. `verify` (capture next frame and return result)
+
+### Required response data per command
+- `ok` / `error`
+- `sessionId`
+- `timestamp`
+- `screen` metadata (`width`, `height`, optional cursor)
+- `artifacts` (e.g. screenshot path)
+- optional `nextHints` for retries/recovery
 
 ---
 
@@ -79,6 +102,7 @@ Outputs:
 
 ### Screen
 - `screenshot --out <path> [--crop x,y,w,h]`
+- `observe --out <path>` (alias/shortcut optimized for agent loops)
 
 ### Input
 - `move --x <int> --y <int>`
@@ -93,7 +117,19 @@ Outputs:
 {
   "ok": true,
   "sessionId": "sess_abc123",
-  "result": {}
+  "timestamp": "2026-03-15T09:12:00Z",
+  "screen": {
+    "width": 1920,
+    "height": 1080
+  },
+  "artifacts": {
+    "screenshot": "/tmp/vnc/frame-001.png"
+  },
+  "result": {
+    "action": "click",
+    "x": 540,
+    "y": 380
+  }
 }
 ```
 

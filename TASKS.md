@@ -16,10 +16,11 @@ Status legend: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 
 ## Sprint C — MVP Implementation
 - [TODO] Implement session connect/disconnect/status
-- [TODO] Implement screenshot command
+- [TODO] Implement screenshot command (`observe` primitive)
 - [TODO] Implement pointer move command
 - [TODO] Implement click command
 - [TODO] Add structured JSON response envelopes
+- [TODO] Include image artifact path + screen metadata in command output
 - [TODO] Add timeout/retry defaults
 
 ## Sprint D — Integration Testing

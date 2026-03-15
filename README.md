@@ -11,6 +11,12 @@ Ship a tiny but meaningful improvement to how agents control and recover remote 
 - Move pointer
 - Click UI elements
 
+## Drive-by-wire model
+This project is intentionally built as a **drive-by-wire CLI** for AI agents:
+- CLI returns machine-readable observations (images + metadata + state)
+- AI agent decides what to do next
+- CLI executes deterministic control commands against the VNC session
+
 ## Planning docs
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [ROADMAP.md](./ROADMAP.md)
