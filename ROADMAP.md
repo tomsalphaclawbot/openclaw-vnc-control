@@ -1,60 +1,32 @@
 # openclaw-vnc-control — Roadmap
 
 ## Phase 0 — Foundations (current)
-Goal: project skeleton, architecture, plan, and task breakdown.
+- [x] Public repo
+- [x] Architecture + planning docs
+- [ ] Pick language/runtime
+- [ ] Pick VNC client library
 
-Deliverables:
-- [x] Public repository initialized
-- [x] Planning docs (`ARCHITECTURE.md`, `ROADMAP.md`, `TASKS.md`)
-- [ ] Decision on language/runtime
-- [ ] Decision on VNC client library
+## Phase 1 — Visual Bridge MVP
+Get the screenshot→click→screenshot loop working end-to-end.
 
-## Phase 1 — Control Primitives MVP
-Goal: reliable core operations from a drive-by-wire CLI.
-
-Scope lock (v1): single VNC target, credentials via args/env, bridge-only behavior.
-
-Deliverables:
 - [ ] Connect/auth to VNC host
-- [ ] Capture screenshot (observation command)
-- [ ] Move pointer
-- [ ] Click (single/double)
-- [ ] Structured JSON output for all commands
-- [ ] Artifact references in output (image paths + screen metadata)
-- [ ] Basic reconnect + timeout handling
+- [ ] Capture screenshot → image file
+- [ ] Move pointer to x,y
+- [ ] Click at x,y (single/double, left/right)
+- [ ] Type text / send keystrokes
+- [ ] Basic timeout + error handling
 
-Exit criteria:
-- Can connect to a real VNC host and perform observe -> act -> verify loop end-to-end.
+**Done when:** can connect to a real VNC host, screenshot, click somewhere, screenshot again.
 
-## Phase 2 — Programmatic API
-Goal: expose primitives for agent/runtime integration.
+## Phase 2 — Agent Integration
+Make it easy for AI agents to use.
 
-Deliverables:
-- [ ] Local API service wrapper
-- [ ] Session creation + routing
-- [ ] Command parity with CLI
-- [ ] Auth/token model for local callers (minimal)
+- [ ] Local API wrapper (optional)
+- [ ] Example integration with OpenClaw image analysis
+- [ ] Session management for long-running control loops
 
-Exit criteria:
-- External process can control VNC using API with deterministic responses.
-
-## Phase 3 — Reliability + Test Harness
-Goal: make it hard to break and easy to validate.
-
-Deliverables:
+## Phase 3 — Hardening
 - [ ] Integration tests against disposable VNC target
-- [ ] Retry/backoff policy hardening
-- [ ] Better diagnostics and error taxonomy
-- [ ] CI workflow for smoke/integration
-
-Exit criteria:
-- Repeatable CI pass on core flows.
-
-## Phase 4 — Developer Experience
-Goal: easy adoption by other operators/builders.
-
-Deliverables:
-- [ ] Quickstart docs (<10 min)
-- [ ] Example scripts
-- [ ] Versioned release process
-- [ ] Tagged v0.1.0 release
+- [ ] CI workflow
+- [ ] Retry/reconnect policies
+- [ ] Tagged v0.1.0 release + quickstart docs

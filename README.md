@@ -1,31 +1,36 @@
 # openclaw-vnc-control
 
-Public project for reliable VNC control workflows with OpenClaw.
+A visual bridge for AI agents to control remote desktops via VNC.
 
-## Mission
-Ship a tiny but meaningful improvement to how agents control and recover remote desktop sessions.
+## What it does
 
-## Core capabilities (MVP)
-- Connect to a VNC host
-- Capture screen output
-- Move pointer
-- Click UI elements
+Captures screenshots and relays pointer/keyboard input over VNC. That's it. The tool is deliberately simple — all intelligence lives in the AI model analyzing the images.
 
-## Drive-by-wire model
-This project is intentionally built as a **drive-by-wire CLI** for AI agents:
-- CLI returns machine-readable observations (images + metadata + state)
-- AI agent decides what to do next
-- CLI executes deterministic control commands against the VNC session
+## The loop
 
-## Scope guardrails (v1)
-- Single VNC host only (no multi-host inventory/fleet management)
-- Credentials come from CLI args or environment variables
-- This tool is a bridge, not a full remote-desktop platform
+1. **Screenshot** → get an image of the remote desktop
+2. **AI analyzes image** → determines where to click (x,y coordinates)
+3. **Move/click** → send the action through VNC
+4. **Screenshot** → verify the result
+5. Repeat
 
-## Planning docs
+## Why
+
+AI agents can browse the web, run code, and call APIs — but they can't click permission dialogs, interact with native app UI, or handle system-level prompts. VNC gives them a universal visual control channel for anything on a screen.
+
+## Scope (v1)
+
+- Single VNC host (not a fleet manager)
+- CLI-first
+- Credentials via args (`--host`, `--port`, `--password`) or env (`VNC_HOST`, `VNC_PORT`, `VNC_PASSWORD`)
+- This is a bridge, not a platform
+
+## Status
+
+Planning complete. Next: technical spike for library/runtime selection.
+
+## Docs
+
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [ROADMAP.md](./ROADMAP.md)
 - [TASKS.md](./TASKS.md)
-
-## Status
-Groundwork complete. Moving into technical spike for library/runtime selection.
