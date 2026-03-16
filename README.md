@@ -191,18 +191,51 @@ The canonical click/typing/key test app lives here:
 - `scripts/click-calibrator.py` (builds request(native) → actual(native) calibration from telemetry)
 - `scripts/run-all-regressions.sh` (one-shot runner)
 
-Run the lab:
+### Agent runbook: spin up lab + run tests
+
+Run the standalone lab app (Terminal A):
 
 ```bash
-cd labs/vnc-click-lab
+cd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab
 npm install
 npm run dev
 # open http://localhost:3015/vnc-click-lab
 ```
 
-Default log path:
+Optional VNC daemon (Terminal B):
 
-- `labs/vnc-click-lab/logs/vnc-click-events.jsonl`
+```bash
+cd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control
+vnc start
+vnc status
+```
+
+Default log path used by all test scripts:
+
+- `/Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl`
+
+Run click regression:
+
+```bash
+python3 scripts/click-regression.py \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
+```
+
+Run input/keystroke regression:
+
+```bash
+python3 scripts/input-key-regression.py \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
+```
+
+Run both suites in one command:
+
+```bash
+scripts/run-all-regressions.sh \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control
+```
 
 Generate a calibration map:
 
@@ -219,4 +252,4 @@ This writes `state/click-calibration.json` with affine correction coefficients a
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — design decisions and component model
 - [ROADMAP.md](./ROADMAP.md) — phased delivery plan
 - [TASKS.md](./TASKS.md) — current sprint status and known issues
-- [docs/VNC_CLICK_LAB.md](./docs/VNC_CLICK_LAB.md) — lab location, install flow, and regression intent
+- [docs/VNC_CLICK_LAB.md](./docs/VNC_CLICK_LAB.md) — standalone lab runbook, telemetry schema, and regression intent
