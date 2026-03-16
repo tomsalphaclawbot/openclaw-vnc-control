@@ -148,16 +148,22 @@ With default 50% scale: capture coords are automatically doubled for native reso
 
 ## Known Issues & Lessons
 
+> Retested 2026-03-15. Status column reflects current state.
+
 ### macOS ARD Specific
-- **`key escape` times out** — macOS ARD doesn't send framebuffer update after Escape. Workaround: flush capture appended to key commands.
-- **Hot corners trigger lock** — keepalive mouse jiggle must avoid screen corners. Center-area jiggle is safe.
-- **`!` character in type command** — vncdotool may handle special chars inconsistently. Use `--force-caps` or `key shift-1` for reliable `!`.
-- **Lock screen submit** — `key return` after password entry is intermittently unreliable on ARD. Under investigation.
-- **Screen lock timing** — macOS locks aggressively (~1-2 min). Daemon keepalive (25s jiggle interval) helps but doesn't fully prevent lock.
+
+| Issue | Status | Notes |
+|-------|--------|-------|
+| **`key escape` times out** | ✅ **FIXED** | Key alias normalization in `vnc-session.py` maps `escape→esc`. Now returns `ok:true` in ~0.06s. |
+| **Hot corners trigger lock** | ✅ **FIXED** | All hot corners disabled (`wvous-tl/bl/br-corner=1`). Daemon keepalive jiggle uses center-area. |
+| **`!` character via `type` command** | ⚠️ **PARTIAL** | `vnc type "bang!test!"` does NOT send `!` — it sends nothing for special chars. Use `vnc key shift-1` instead for `!`. Other keyboard specials may have similar gaps. Browser test confirmed: `shift-1` logs as keydown `Shift`+`1` (not `!`). For lock screen, raw `vncdo type` works correctly for the full password string including `!`. |
+| **Lock screen submit via `key return`** | ⚠️ **CONTEXT-DEPENDENT** | In the VNC daemon, `key return` is mapped to `enter` via alias normalization — this works for browser fields. On the **macOS lock screen**, submitting via `key return` does NOT unlock (password field returns to empty). Proven workaround: use raw `vncdo key enter` directly (bypassing daemon), which submits successfully. |
+| **Screen lock timing** | ✅ **FIXED** | Root cause confirmed by Tom: Lock Screen policy was set to "require password after 2 seconds". Changed to 1 hour. Additionally: screensaver idle=1800s, password delay=1800s, display sleep=0 on AC, caffeinate running. 3-minute idle test passed — desktop remained unlocked with daemon keepalive active. |
 
 ### General
 - Each command opens a new VNC connection (~1.3s overhead). The daemon mitigates this with keepalive but doesn't pool connections.
 - Persistent API connections (vncdotool threaded API, asyncvnc) were tested and abandoned due to macOS ARD framebuffer issues (black screenshots, timeout hangs).
+- For lock-screen unlock, the most reliable sequence is: `vncdo key bsp` ×20 (clear field) → `vncdo type '<password>'` → `vncdo key enter`. The daemon wrapper adds overhead that causes the ARD lock→desktop transition to not register.
 
 ## Scope (v1)
 
