@@ -180,17 +180,39 @@ This project includes a ready-to-use [OpenClaw/AgentSkill](./skill/SKILL.md). An
 3. Read `skill/SKILL.md` for full usage instructions
 4. Start the observe→decide→act→verify loop
 
-## Click Accuracy Lab (now project-local)
+## Click Accuracy Lab (standalone in this repo)
 
-The canonical click/typing/key test lab now lives in this repo:
+The canonical click/typing/key test app lives here:
 
 - `labs/vnc-click-lab/`
 - [docs/VNC_CLICK_LAB.md](./docs/VNC_CLICK_LAB.md)
 - `scripts/click-regression.py` (automated 22-button sweep validator)
 - `scripts/input-key-regression.py` (automated field-input + keystroke coverage)
-- `scripts/run-all-regressions.sh` (one-shot runner for both)
+- `scripts/click-calibrator.py` (builds request(native) → actual(native) calibration from telemetry)
+- `scripts/run-all-regressions.sh` (one-shot runner)
 
-Use it to run repeatable VNC regression checks against button clicks, field focus/typing, and key handling.
+Run the lab:
+
+```bash
+cd labs/vnc-click-lab
+npm install
+npm run dev
+# open http://localhost:3015/vnc-click-lab
+```
+
+Default log path:
+
+- `labs/vnc-click-lab/logs/vnc-click-events.jsonl`
+
+Generate a calibration map:
+
+```bash
+python3 scripts/click-calibrator.py \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
+```
+
+This writes `state/click-calibration.json` with affine correction coefficients and fit-error stats.
 
 ## Docs
 

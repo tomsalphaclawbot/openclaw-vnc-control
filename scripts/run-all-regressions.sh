@@ -6,10 +6,10 @@ usage() {
 Run all VNC Click Lab regressions (button clicks + input/keys).
 
 Usage:
-  scripts/run-all-regressions.sh --log-path /path/to/logs/vnc-click-events.jsonl [--vnc-cwd /path/to/openclaw-vnc-control]
+  scripts/run-all-regressions.sh [--log-path /path/to/logs/vnc-click-events.jsonl] [--vnc-cwd /path/to/openclaw-vnc-control]
 
 Options:
-  --log-path   Required. Path to the click lab JSONL log file.
+  --log-path   Optional. Defaults to <vnc-cwd>/labs/vnc-click-lab/logs/vnc-click-events.jsonl
   --vnc-cwd    Optional. Defaults to current project root.
 EOF
 }
@@ -40,13 +40,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$LOG_PATH" ]]; then
-  echo "Error: --log-path is required" >&2
-  usage
-  exit 1
+  LOG_PATH="$VNC_CWD/labs/vnc-click-lab/logs/vnc-click-events.jsonl"
 fi
 
 if [[ ! -f "$LOG_PATH" ]]; then
   echo "Error: log file not found: $LOG_PATH" >&2
+  echo "Hint: run the standalone lab first (cd labs/vnc-click-lab && npm run dev), then generate events." >&2
   exit 1
 fi
 

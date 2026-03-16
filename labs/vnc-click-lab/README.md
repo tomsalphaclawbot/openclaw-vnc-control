@@ -1,83 +1,68 @@
-# VNC Click Accuracy Lab
+# VNC Click Accuracy Lab (Standalone)
 
-This lab is now housed in the `openclaw-vnc-control` project so click/typing validation lives with the VNC bridge code.
+This folder is the canonical, standalone web app for click testing in `openclaw-vnc-control`.
 
-## Purpose
+## What it contains
 
-A deterministic browser test surface to validate:
-- button click accuracy
-- background click detection
-- field focus/input behavior
-- key press propagation (`Enter`, modifiers, arrows, etc.)
+- `app/vnc-click-lab/page.tsx` — click/typing/key test UI
+- `app/api/vnc-click-log/route.ts` — JSONL logger API
+- `app/page.tsx` — simple launcher page
+- `logs/vnc-click-events.jsonl` — runtime event log output (gitignored)
 
-## Included Files
+## Run locally
 
-- `app/vnc-click-lab/page.tsx`
-  - Test page with:
-    - 22 fixed-position buttons
-    - `agent_input` and `agent_text_field`
-    - focus buttons for both fields
-    - client-side event logging calls
-- `app/api/vnc-click-log/route.ts`
-  - API endpoint that appends JSONL events to `logs/vnc-click-events.jsonl`
+```bash
+cd labs/vnc-click-lab
+npm install
+npm run dev
+```
 
-## Event Types
+Open:
+- `http://localhost:3015/`
+- `http://localhost:3015/vnc-click-lab`
 
-The lab logs these event types:
+## Event types
+
 - `button_click`
 - `background_click`
 - `field_focus`
 - `field_input`
 - `field_keydown`
 
-## Use in a Next.js App
+## Calibration telemetry
 
-From a Next.js app root, copy the lab routes in:
+Each click event includes:
+- `windowMetrics` (scroll, inner/outer size, DPR, screenX/screenY)
+- `pointerMeta` (page/client/screen + derived native coords)
+- `targetPoint` (expected button center)
+- `targetError` (actual minus expected deltas)
 
-```bash
-mkdir -p app/vnc-click-lab app/api/vnc-click-log
-cp /path/to/openclaw-vnc-control/labs/vnc-click-lab/app/vnc-click-lab/page.tsx app/vnc-click-lab/page.tsx
-cp /path/to/openclaw-vnc-control/labs/vnc-click-lab/app/api/vnc-click-log/route.ts app/api/vnc-click-log/route.ts
-```
+This enables page→screen conversion and offline click calibration fitting.
 
-Then run your app and open:
+## Regression scripts
 
-- `http://localhost:<port>/vnc-click-lab`
-
-Logs are written to:
-
-- `<next-app>/logs/vnc-click-events.jsonl`
-
-## Automated button sweep
-
-Use the project-level runner:
+From project root:
 
 ```bash
 python3 scripts/click-regression.py \
   --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
-  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
 ```
-
-This validates all 22 buttons and exits non-zero on any mismatch.
-
-For text fields + key coverage:
 
 ```bash
 python3 scripts/input-key-regression.py \
   --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
-  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
 ```
 
-Run both in one shot:
+```bash
+python3 scripts/click-calibrator.py \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
+```
 
 ```bash
 scripts/run-all-regressions.sh \
   --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
-  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
 ```
-
-## Notes
-
-- The button layout is deterministic to make click regression reproducible.
-- Keep logs out of git (`logs/` in `.gitignore`).
-- This lab is intentionally simple and optimized for VNC-agent verification, not UI polish.

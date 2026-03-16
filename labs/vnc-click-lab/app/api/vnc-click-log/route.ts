@@ -7,6 +7,8 @@ const LOG_PATH = path.join(LOG_DIR, "vnc-click-events.jsonl");
 
 type EventType = "button_click" | "background_click" | "field_focus" | "field_input" | "field_keydown";
 
+type JsonObject = Record<string, unknown>;
+
 type LabPayload = {
   eventType?: EventType;
   buttonId?: string;
@@ -25,6 +27,11 @@ type LabPayload = {
   code?: string;
   page?: string;
   clickedAtClient?: string;
+
+  windowMetrics?: JsonObject;
+  pointerMeta?: JsonObject;
+  targetPoint?: JsonObject;
+  targetError?: JsonObject;
 };
 
 function asNumber(value: unknown): number | null {
@@ -35,6 +42,11 @@ function asNumber(value: unknown): number | null {
 function asString(value: unknown, maxLen = 300): string | null {
   if (typeof value !== "string") return null;
   return value.slice(0, maxLen);
+}
+
+function asObject(value: unknown): JsonObject | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as JsonObject;
 }
 
 export async function POST(req: NextRequest) {
@@ -49,10 +61,7 @@ export async function POST(req: NextRequest) {
   }
 
   if ((eventType === "field_focus" || eventType === "field_input") && !body.fieldName) {
-    return NextResponse.json(
-      { ok: false, error: "field events require fieldName" },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, error: "field events require fieldName" }, { status: 400 });
   }
 
   const serverTs = new Date().toISOString();
@@ -77,6 +86,12 @@ export async function POST(req: NextRequest) {
     fieldValue: asString(body.fieldValue, 400),
     key: asString(body.key, 40),
     code: asString(body.code, 40),
+
+    // New telemetry block for calibration / page→screen conversion
+    windowMetrics: asObject(body.windowMetrics),
+    pointerMeta: asObject(body.pointerMeta),
+    targetPoint: asObject(body.targetPoint),
+    targetError: asObject(body.targetError),
 
     page: asString(body.page, 120) ?? "/vnc-click-lab",
     clientTs: asString(body.clickedAtClient, 60),

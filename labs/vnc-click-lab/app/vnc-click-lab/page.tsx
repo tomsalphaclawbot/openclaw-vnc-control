@@ -10,6 +10,61 @@ type ButtonDef = {
   tone: string;
 };
 
+type WindowMetrics = {
+  scrollX: number;
+  scrollY: number;
+  innerWidth: number;
+  innerHeight: number;
+  outerWidth: number;
+  outerHeight: number;
+  screenX: number;
+  screenY: number;
+  devicePixelRatio: number;
+};
+
+type DerivedScreenPoint = {
+  clientX: number;
+  clientY: number;
+  chromeTop: number;
+  screenCssX: number;
+  screenCssY: number;
+  screenNativeX: number;
+  screenNativeY: number;
+};
+
+type PointerMeta = {
+  pageX: number;
+  pageY: number;
+  clientX: number;
+  clientY: number;
+  eventScreenX: number;
+  eventScreenY: number;
+  eventScreenNativeX: number;
+  eventScreenNativeY: number;
+  derivedFromPage: DerivedScreenPoint;
+};
+
+type TargetPointMeta = {
+  buttonId: string;
+  label: string;
+  xPct: number;
+  yPct: number;
+  pageX: number;
+  pageY: number;
+  clientX: number;
+  clientY: number;
+  derivedFromPage: DerivedScreenPoint;
+};
+
+type TargetErrorMeta = {
+  deltaPageX: number;
+  deltaPageY: number;
+  deltaClientX: number;
+  deltaClientY: number;
+  deltaNativeX: number;
+  deltaNativeY: number;
+};
+
 type LabEventPayload = {
   eventType: "button_click" | "background_click" | "field_focus" | "field_input" | "field_keydown";
   page: string;
@@ -18,16 +73,21 @@ type LabEventPayload = {
   label?: string;
   xPct?: number;
   yPct?: number;
-  clickX?: number;
-  clickY?: number;
-  clickXPct?: number;
-  clickYPct?: number;
+  clickX?: number | null;
+  clickY?: number | null;
+  clickXPct?: number | null;
+  clickYPct?: number | null;
   target?: string;
   fieldName?: string;
   fieldKind?: "input" | "text";
   fieldValue?: string;
   key?: string;
   code?: string;
+
+  windowMetrics?: WindowMetrics;
+  pointerMeta?: PointerMeta;
+  targetPoint?: TargetPointMeta;
+  targetError?: TargetErrorMeta;
 };
 
 const LABELS = [
@@ -65,6 +125,10 @@ const TONES = [
   "bg-cyan-500 hover:bg-cyan-400",
   "bg-purple-500 hover:bg-purple-400",
 ];
+
+function round4(value: number): number {
+  return Number(value.toFixed(4));
+}
 
 function buildButtons(): ButtonDef[] {
   // Deterministic non-overlapping grid that stays clear of the top-left typing panel.
@@ -126,10 +190,96 @@ export default function VncClickLabPage() {
     const relY = Math.max(0, Math.min(rect.height, clientY - rect.top));
 
     return {
-      clickX: Number(relX.toFixed(2)),
-      clickY: Number(relY.toFixed(2)),
-      clickXPct: Number(((relX / rect.width) * 100).toFixed(4)),
-      clickYPct: Number(((relY / rect.height) * 100).toFixed(4)),
+      clickX: round4(relX),
+      clickY: round4(relY),
+      clickXPct: round4((relX / rect.width) * 100),
+      clickYPct: round4((relY / rect.height) * 100),
+    };
+  }
+
+  function getWindowMetrics(): WindowMetrics {
+    const dpr = window.devicePixelRatio || 1;
+    return {
+      scrollX: round4(window.scrollX),
+      scrollY: round4(window.scrollY),
+      innerWidth: round4(window.innerWidth),
+      innerHeight: round4(window.innerHeight),
+      outerWidth: round4(window.outerWidth),
+      outerHeight: round4(window.outerHeight),
+      screenX: round4(window.screenX),
+      screenY: round4(window.screenY),
+      devicePixelRatio: round4(dpr),
+    };
+  }
+
+  function deriveScreenFromPage(pageX: number, pageY: number, metrics: WindowMetrics): DerivedScreenPoint {
+    const clientX = pageX - metrics.scrollX;
+    const clientY = pageY - metrics.scrollY;
+    const chromeTop = metrics.outerHeight - metrics.innerHeight;
+
+    const screenCssX = metrics.screenX + clientX;
+    const screenCssY = metrics.screenY + chromeTop + clientY;
+
+    return {
+      clientX: round4(clientX),
+      clientY: round4(clientY),
+      chromeTop: round4(chromeTop),
+      screenCssX: round4(screenCssX),
+      screenCssY: round4(screenCssY),
+      screenNativeX: round4(screenCssX * metrics.devicePixelRatio),
+      screenNativeY: round4(screenCssY * metrics.devicePixelRatio),
+    };
+  }
+
+  function pointerMetaFromMouseEvent(e: React.MouseEvent<HTMLElement>, metrics: WindowMetrics): PointerMeta {
+    const pageX = round4(e.pageX);
+    const pageY = round4(e.pageY);
+
+    return {
+      pageX,
+      pageY,
+      clientX: round4(e.clientX),
+      clientY: round4(e.clientY),
+      eventScreenX: round4(e.screenX),
+      eventScreenY: round4(e.screenY),
+      eventScreenNativeX: round4(e.screenX * metrics.devicePixelRatio),
+      eventScreenNativeY: round4(e.screenY * metrics.devicePixelRatio),
+      derivedFromPage: deriveScreenFromPage(pageX, pageY, metrics),
+    };
+  }
+
+  function targetPointForButton(btn: ButtonDef, metrics: WindowMetrics): TargetPointMeta | null {
+    const rect = labRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+
+    const clientX = rect.left + rect.width * (btn.xPct / 100);
+    const clientY = rect.top + rect.height * (btn.yPct / 100);
+    const pageX = clientX + metrics.scrollX;
+    const pageY = clientY + metrics.scrollY;
+
+    return {
+      buttonId: btn.id,
+      label: btn.label,
+      xPct: btn.xPct,
+      yPct: btn.yPct,
+      pageX: round4(pageX),
+      pageY: round4(pageY),
+      clientX: round4(clientX),
+      clientY: round4(clientY),
+      derivedFromPage: deriveScreenFromPage(round4(pageX), round4(pageY), metrics),
+    };
+  }
+
+  function computeTargetError(pointer: PointerMeta, target: TargetPointMeta | null): TargetErrorMeta | undefined {
+    if (!target) return undefined;
+
+    return {
+      deltaPageX: round4(pointer.pageX - target.pageX),
+      deltaPageY: round4(pointer.pageY - target.pageY),
+      deltaClientX: round4(pointer.clientX - target.clientX),
+      deltaClientY: round4(pointer.clientY - target.clientY),
+      deltaNativeX: round4(pointer.derivedFromPage.screenNativeX - target.derivedFromPage.screenNativeX),
+      deltaNativeY: round4(pointer.derivedFromPage.screenNativeY - target.derivedFromPage.screenNativeY),
     };
   }
 
@@ -158,6 +308,11 @@ export default function VncClickLabPage() {
 
   async function handleButtonClick(btn: ButtonDef, e: React.MouseEvent<HTMLButtonElement>) {
     e.stopPropagation();
+
+    const windowMetrics = getWindowMetrics();
+    const pointerMeta = pointerMetaFromMouseEvent(e, windowMetrics);
+    const targetPoint = targetPointForButton(btn, windowMetrics);
+    const targetError = computeTargetError(pointerMeta, targetPoint);
     const meta = sectionMeta(e.clientX, e.clientY);
 
     await logLabEvent(
@@ -171,6 +326,10 @@ export default function VncClickLabPage() {
         clickedAtClient: new Date().toISOString(),
         ...meta,
         target: "button",
+        windowMetrics,
+        pointerMeta,
+        targetPoint: targetPoint ?? undefined,
+        targetError,
       },
       `Logged ${btn.id} (${btn.label})`
     );
@@ -178,6 +337,9 @@ export default function VncClickLabPage() {
 
   async function handleBackgroundClick(e: React.MouseEvent<HTMLElement>) {
     if (e.target !== e.currentTarget) return;
+
+    const windowMetrics = getWindowMetrics();
+    const pointerMeta = pointerMetaFromMouseEvent(e, windowMetrics);
     const meta = sectionMeta(e.clientX, e.clientY);
 
     await logLabEvent(
@@ -187,6 +349,8 @@ export default function VncClickLabPage() {
         clickedAtClient: new Date().toISOString(),
         ...meta,
         target: "background",
+        windowMetrics,
+        pointerMeta,
       },
       `Logged background click @ (${meta.clickX}, ${meta.clickY})`
     );
@@ -201,6 +365,7 @@ export default function VncClickLabPage() {
         page: "/vnc-click-lab",
         clickedAtClient: new Date().toISOString(),
         target: "field",
+        windowMetrics: getWindowMetrics(),
       },
       `Logged field focus: ${fieldName}`
     );
@@ -216,6 +381,7 @@ export default function VncClickLabPage() {
         page: "/vnc-click-lab",
         clickedAtClient: new Date().toISOString(),
         target: "field",
+        windowMetrics: getWindowMetrics(),
       },
       `Logged field input: ${fieldName}`
     );
@@ -232,6 +398,7 @@ export default function VncClickLabPage() {
         page: "/vnc-click-lab",
         clickedAtClient: new Date().toISOString(),
         target: "field",
+        windowMetrics: getWindowMetrics(),
       },
       `Logged field key: ${fieldName} ${key}`
     );
@@ -242,8 +409,8 @@ export default function VncClickLabPage() {
       <div className="mx-auto max-w-6xl px-4 py-4">
         <h1 className="text-2xl font-bold">VNC Click Accuracy Lab</h1>
         <p className="mt-1 text-sm text-slate-300">
-          22 distributed buttons + named typing fields. Every button click, field event, and background
-          click is logged to server-side JSONL.
+          22 distributed buttons + named typing fields. Every button click now logs page/client/screen
+          telemetry so we can calibrate pageX/pageY → true screen coordinates.
         </p>
         <p className="mt-2 rounded bg-slate-900/80 px-3 py-2 text-xs text-slate-200">
           {lastEvent}

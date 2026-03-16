@@ -1,87 +1,71 @@
-# VNC Click Accuracy Lab (Project-Local)
+# VNC Click Accuracy Lab (Project-Local Standalone App)
 
 ## Status
 
-The click accuracy lab has been moved into this repository:
+The click lab now runs as its own standalone Next.js app inside this repository:
 
 - `labs/vnc-click-lab/`
 
-It is no longer anchored to `hello-world-nextjs` as the source-of-truth.
+No external app is required.
 
-## Why this move
+## Why
 
-- Keeps validation assets beside the VNC bridge code.
-- Makes click/key regression repeatable when `vnc-control.py` / `vnc-session.py` change.
-- Avoids split ownership across unrelated projects.
+- Keeps web test surface + VNC bridge in one project.
+- Eliminates cross-project drift.
+- Makes regression and calibration reproducible.
 
-## Contents
+## Structure
 
 - `labs/vnc-click-lab/app/vnc-click-lab/page.tsx`
 - `labs/vnc-click-lab/app/api/vnc-click-log/route.ts`
-- `labs/vnc-click-lab/install-into-nextjs.sh`
-- `labs/vnc-click-lab/README.md`
+- `labs/vnc-click-lab/app/page.tsx`
+- `labs/vnc-click-lab/logs/vnc-click-events.jsonl` (runtime output)
 
-## How to use
-
-1. Install routes into any Next.js app:
+## Start the lab
 
 ```bash
-./labs/vnc-click-lab/install-into-nextjs.sh /path/to/nextjs-app
+cd labs/vnc-click-lab
+npm install
+npm run dev
 ```
 
-2. Run that app, then open:
+Open:
+- `http://localhost:3015/vnc-click-lab`
 
-- `http://localhost:<port>/vnc-click-lab`
+## Telemetry for calibration
 
-3. Use VNC bridge commands to interact and verify logs at:
+Event payload includes:
+- `windowMetrics`
+- `pointerMeta`
+- `targetPoint`
+- `targetError`
 
-- `<next-app>/logs/vnc-click-events.jsonl`
+This supports page/client/screen/native mapping and affine correction fitting.
 
-## Automated regression script
-
-Run the full 22-button sweep with:
+## Regression scripts
 
 ```bash
 python3 scripts/click-regression.py \
   --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
-  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
 ```
-
-What it does:
-- computes deterministic button centers from the lab grid
-- clicks each button via the VNC bridge
-- verifies backend JSONL recorded the expected `button_click` label
-- retries with small jitter offsets if needed
-- exits non-zero on failures
-
-Geometry can be overridden for different window/viewport calibrations:
-`--section-left --section-top --section-width --section-height`.
-
-Run field + keystroke regression with:
 
 ```bash
 python3 scripts/input-key-regression.py \
   --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
-  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
 ```
 
-What it validates:
-- `agent_input` receives typed text and logs `field_input`
-- `agent_text_field` receives multiline text with Enter line breaks
-- special keys + modifiers generate expected `field_keydown` events (Enter, Tab, Escape, Backspace, Delete, arrows, Shift/Meta/Control)
+```bash
+python3 scripts/click-calibrator.py \
+  --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
+```
 
-Run both regressions in one command:
+## One-shot runner
 
 ```bash
 scripts/run-all-regressions.sh \
   --vnc-cwd /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control \
-  --log-path /path/to/nextjs-app/logs/vnc-click-events.jsonl
+  --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
 ```
-
-## Regression intent
-
-This lab is the canonical surface for:
-- full button click sweeps
-- focus/typing tests
-- key/modifier mapping verification
-- coordinate-space sanity checks (`capture`/`native`/`normalized`)
