@@ -11,8 +11,8 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 - [DONE] Create project folder and public GitHub repo
 - [DONE] README, ARCHITECTURE, ROADMAP, TASKS docs
 - [DONE] Lock scope: single-host bridge, args/env credentials, CLI-first
-- [TODO] Add license file
-- [TODO] Add `.env.example` template
+- [DONE] Add license file (MIT, 2026-03-18)
+- [DONE] Add `.env.example` template (2026-03-18)
 
 ## Sprint B — Technical Spike ✅ DONE
 - [DONE] Research landscape: ClawHub (computer-use, virtual-remote-desktop, remote-desktop), Perplexity, X, GitHub
@@ -105,7 +105,9 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 
 ## Immediate Next Actions
 1. ~~Fix lock screen unlock reliability (Issue #3)~~ ✅ detect_lock_screen + unlock with retry (2026-03-18)
-2. Create `.env.example` template
-3. Add license file
-4. Commit all v2 changes and push
-5. Update skill/SKILL.md for v2 daemon usage (add detect-lock / unlock commands)
+2. ~~Create `.env.example` template~~ ✅ done 2026-03-18
+3. ~~Add license file~~ ✅ MIT license added 2026-03-18
+4. ~~Update skill/SKILL.md for v2 daemon usage (detect-lock / unlock commands)~~ ✅ done 2026-03-18
+5. Commit all v2 changes and push ← next
+6. Live test detect-lock + unlock against a locked macOS ARD session
+7. Sprint F: automated e2e smoke test, tagged v0.1.0 release

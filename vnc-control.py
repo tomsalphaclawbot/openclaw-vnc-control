@@ -194,6 +194,22 @@ def get_profile(args):
     return getattr(args, "profile", None) or os.environ.get("VNC_PROFILE", DEFAULT_PROFILE)
 
 
+def normalize_key_name(key: str) -> str:
+    """Normalize key aliases for better macOS ARD compatibility.
+
+    Empirical finding: `vncdo key Return` frequently times out/hangs against macOS ARD,
+    while `vncdo key enter` succeeds reliably.
+    """
+    k = key.strip()
+    aliases = {
+        "return": "enter",
+        "kp_enter": "enter",
+        "iso_enter": "enter",
+        "linefeed": "enter",
+    }
+    return aliases.get(k.lower(), k)
+
+
 def capture_settings(args, prefer_last_scale=False):
     """Resolve capture format/scale/quality from profile + args.
 
@@ -531,11 +547,12 @@ def cmd_key(args, config):
     - Take a separate verify screenshot after
     """
     keys = args.keys  # list of keys
+    normalized_keys = [normalize_key_name(k) for k in keys]
 
     # Build actions: key1 key2 ... + flush capture
     flush = tmpfile(".key-flush", "png")
     actions = []
-    for k in keys:
+    for k in normalized_keys:
         actions += ["key", k]
     actions += ["capture", flush]
 
@@ -554,6 +571,7 @@ def cmd_key(args, config):
         result_json(True, {
             "action": "key",
             "keys": keys,
+            "keys_sent": normalized_keys,
             "duration_s": duration,
             "timed_out": timed_out,
             "note": "Key sent successfully (framebuffer timeout is normal on macOS ARD)" if timed_out else None,
@@ -586,13 +604,23 @@ def cmd_combo(args, config):
             nx, ny, _, _, _ = resolve_native_coords(x, y, input_space, config, scale=scale)
             vncdo_actions += ["move", str(int(nx)), str(int(ny))]
         elif action == "click":
-            button = parts[1] if len(parts) > 1 else "1"
-            vncdo_actions += ["click", button]
+            # Supports either:
+            #   click,1                -> click button 1 at current cursor
+            #   click,X,Y              -> move to X,Y then left click
+            #   click,X,Y,BUTTON       -> move to X,Y then click BUTTON
+            if len(parts) >= 3:
+                x, y = float(parts[1]), float(parts[2])
+                btn = parts[3] if len(parts) >= 4 else "1"
+                nx, ny, _, _, _ = resolve_native_coords(x, y, input_space, config, scale=scale)
+                vncdo_actions += ["move", str(int(nx)), str(int(ny)), "click", btn]
+            else:
+                button = parts[1] if len(parts) > 1 else "1"
+                vncdo_actions += ["click", button]
         elif action == "type" and len(parts) >= 2:
             text = ",".join(parts[1:])
             vncdo_actions += ["type", text]
         elif action == "key" and len(parts) >= 2:
-            vncdo_actions += ["key", parts[1]]
+            vncdo_actions += ["key", normalize_key_name(parts[1])]
         elif action == "pause" and len(parts) >= 2:
             vncdo_actions += ["pause", parts[1]]
         elif action == "capture" and len(parts) >= 2:
