@@ -48,8 +48,8 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
   - `--force-caps` mode vs manual `key shift-1` for `!` character
   - Click on submit arrow button — coordinates need refinement
   - **Root cause hypothesis**: macOS ARD lock→desktop transition doesn't produce expected VNC framebuffer response, causing vncdo to block
-- [TODO] Lock detection from screenshot signature
-- [TODO] Auto-unlock macro with retry logic
+- [DONE] Lock detection from screenshot signature (`detect_lock_screen`: luminance + center-card + arrow-button heuristics; unit-tested 2026-03-18)
+- [DONE] Auto-unlock macro with retry logic (`unlock`: click field → clear → paste pw → click arrow / fallback key return → verify with detect_lock_screen; up to N retries; 2026-03-18)
 - [DONE] macOS lock behavior tuned for VNC stability
   - `defaults -currentHost write com.apple.screensaver idleTime -int 1800`
   - `defaults write com.apple.screensaver askForPasswordDelay -int 1800`
@@ -104,8 +104,8 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 - **Result**: No existing tool provides standalone VNC bridge for AI agent loops. Gap confirmed.
 
 ## Immediate Next Actions
-1. Fix lock screen unlock reliability (Issue #3)
+1. ~~Fix lock screen unlock reliability (Issue #3)~~ ✅ detect_lock_screen + unlock with retry (2026-03-18)
 2. Create `.env.example` template
 3. Add license file
 4. Commit all v2 changes and push
-5. Update skill/SKILL.md for v2 daemon usage
+5. Update skill/SKILL.md for v2 daemon usage (add detect-lock / unlock commands)

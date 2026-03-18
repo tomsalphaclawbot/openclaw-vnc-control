@@ -164,10 +164,39 @@ class Daemon:
             self._with_retry(lambda: self.client.paste(text))
         return {"ok": True, "length": len(text)}
 
+    def _normalize_key(self, keyname: str) -> str:
+        key = (keyname or "").strip().lower().replace("+", "-")
+        if not key:
+            return keyname
+
+        alias = {
+            "return": "enter",
+            "linefeed": "enter",
+            "kp_enter": "enter",
+            "iso_enter": "enter",
+            "escape": "esc",
+            "backspace": "bsp",
+            "control": "ctrl",
+            "cmd": "super",
+            "command": "super",
+            "option": "alt",
+            "arrowleft": "left",
+            "arrowright": "right",
+            "arrowup": "up",
+            "arrowdown": "down",
+        }
+
+        # Support combo keys like cmd-a / control-c / option-left
+        parts = [p for p in key.split("-") if p]
+        mapped = [alias.get(p, p) for p in parts]
+        return "-".join(mapped)
+
     def key(self, keyname):
+        requested = keyname
+        normalized = self._normalize_key(keyname)
         with self.lock:
-            self._with_retry(lambda: self.client.keyPress(keyname))
-        return {"ok": True, "key": keyname}
+            self._with_retry(lambda: self.client.keyPress(normalized))
+        return {"ok": True, "key": requested, "key_sent": normalized}
 
     def _to_native(self, x, y, space):
         x, y = float(x), float(y)
@@ -179,6 +208,231 @@ class Daemon:
             factor = 1.0 / self.last_scale if self.last_scale > 0 else 2.0
             return int(x * factor), int(y * factor)
         return int(x), int(y)
+
+    # ────────────────────────────────────────────────────────────
+    # Lock screen detection + auto-unlock
+    # ────────────────────────────────────────────────────────────
+
+    def detect_lock_screen(self, img_path: str | None = None) -> dict:
+        """
+        Detect whether the current screen is a macOS lock screen.
+
+        Strategy: macOS lock screen has a blurred/darkened wallpaper background
+        with a password input field near vertical center and a circular avatar above.
+        Heuristics used (all PIL, no OCR required):
+          1. Mean luminance: lock screen tends to be moderately dark (blurred bg)
+          2. Center-column darkness: the password field region is dark/grey
+          3. Aspect ratio of dark clusters in center band
+
+        Returns:
+            {"ok": True, "locked": bool, "confidence": float 0..1,
+             "reasons": [...], "screenshot": path}
+        """
+        from PIL import Image
+        import statistics
+
+        # Take fresh screenshot if no path provided
+        own_screenshot = img_path is None
+        if own_screenshot:
+            r = self.screenshot(scale=0.25, fmt="jpeg", quality=60)
+            img_path = r["path"]
+
+        try:
+            img = Image.open(img_path).convert("L")  # greyscale
+        except Exception as e:
+            return {"ok": False, "error": f"img load failed: {e}"}
+
+        w, h = img.size
+        # get_flattened_data preferred in Pillow >= 11 (getdata deprecated in 14)
+        try:
+            pixels = list(img.get_flattened_data())
+        except AttributeError:
+            pixels = list(img.getdata())
+
+        # ── Heuristic 1: mean luminance ──────────────────────────────
+        mean_lum = statistics.mean(pixels)
+        # Lock screen wallpaper: blurred and slightly darkened — typically 60-150
+        # Normal desktop: brighter with app windows — can be quite bright or dark
+        lum_score = 1.0 if 40 <= mean_lum <= 170 else 0.0
+
+        # ── Heuristic 2: center horizontal band uniformity ───────────
+        # On lock screen the center vertical band (where the login widget sits)
+        # has a semi-transparent dark card. We look for a vertically centered
+        # strip that is notably darker than the outer regions.
+        band_top = int(h * 0.35)
+        band_bot = int(h * 0.75)
+        center_l = int(w * 0.30)
+        center_r = int(w * 0.70)
+
+        center_pixels = []
+        outer_pixels = []
+        for y in range(band_top, band_bot):
+            for x in range(w):
+                px = pixels[y * w + x]
+                if center_l <= x <= center_r:
+                    center_pixels.append(px)
+                else:
+                    outer_pixels.append(px)
+
+        if center_pixels and outer_pixels:
+            center_mean = statistics.mean(center_pixels)
+            outer_mean = statistics.mean(outer_pixels)
+            # On lock screen: center card is darker than blurred edges (or similar).
+            # Delta is subtle; we just check center is reasonably dark (< 140).
+            center_dark = center_mean < 140
+            # Also check low standard deviation in center → uniform dark panel
+            center_std = statistics.stdev(center_pixels) if len(center_pixels) > 1 else 999
+            center_uniform = center_std < 65
+            center_score = 1.0 if (center_dark and center_uniform) else 0.5 if center_dark else 0.0
+        else:
+            center_score = 0.0
+            center_mean = 0.0
+            center_std = 0.0
+
+        # ── Heuristic 3: very bright spot in lower-center ────────────
+        # The submit arrow button is a bright white/blue circle.
+        arrow_top = int(h * 0.58)
+        arrow_bot = int(h * 0.72)
+        arrow_l = int(w * 0.48)
+        arrow_r = int(w * 0.60)
+        arrow_pixels = [
+            pixels[y * w + x]
+            for y in range(arrow_top, arrow_bot)
+            for x in range(arrow_l, arrow_r)
+        ]
+        if arrow_pixels:
+            bright_count = sum(1 for p in arrow_pixels if p > 190)
+            bright_ratio = bright_count / len(arrow_pixels)
+            # A distinct bright circle in an otherwise dark field = submit arrow
+            arrow_score = 1.0 if (0.05 <= bright_ratio <= 0.60) else 0.0
+        else:
+            arrow_score = 0.0
+            bright_ratio = 0.0
+
+        # ── Composite confidence ─────────────────────────────────────
+        confidence = (lum_score * 0.25 + center_score * 0.45 + arrow_score * 0.30)
+        locked = confidence >= 0.55
+
+        reasons = []
+        if lum_score > 0:
+            reasons.append(f"mean_lum={mean_lum:.0f} in [40,170]")
+        else:
+            reasons.append(f"mean_lum={mean_lum:.0f} outside lock range")
+        reasons.append(f"center_mean={center_mean:.0f} std={center_std:.0f} score={center_score:.2f}")
+        reasons.append(f"arrow_bright_ratio={bright_ratio:.2f} score={arrow_score:.2f}")
+
+        return {
+            "ok": True,
+            "locked": locked,
+            "confidence": round(confidence, 3),
+            "reasons": reasons,
+            "screenshot": img_path,
+        }
+
+    def unlock(self, password: str, max_attempts: int = 3, click_arrow: bool = True) -> dict:
+        """
+        Attempt to unlock the macOS lock screen.
+
+        Strategy (iterated up to max_attempts):
+          1. Click password field (center of screen, ~60% down)
+          2. Clear any existing content (cmd-a + delete)
+          3. Paste password
+          4. Submit: try click on arrow button first; fall back to key return
+          5. Wait 1.5s for transition
+          6. Check if still locked (detect_lock_screen confidence < 0.45)
+
+        Returns:
+            {"ok": True/False, "unlocked": bool, "attempts": int,
+             "error": str (if failed), "final_screenshot": path}
+        """
+        import time
+
+        attempts = 0
+        last_screenshot = None
+
+        # Arrow button native coordinates (macOS lock screen @ 3420x2214)
+        # Password field: ~center x, ~55-60% down from top
+        # Arrow submit: slightly right of center, ~62% down
+        field_nx = self.native_w // 2
+        field_ny = int(self.native_h * 0.57)
+        arrow_nx = int(self.native_w * 0.535)
+        arrow_ny = int(self.native_h * 0.625)
+
+        while attempts < max_attempts:
+            attempts += 1
+
+            try:
+                # Step 1: click the password field
+                with self.lock:
+                    self._with_retry(lambda: self.client.mouseMove(field_nx, field_ny))
+                    self._with_retry(lambda: self.client.mousePress(1))
+                time.sleep(0.3)
+
+                # Step 2: select-all + delete to clear any stale content
+                with self.lock:
+                    self._with_retry(lambda: self.client.keyPress("super-a"))
+                time.sleep(0.1)
+                with self.lock:
+                    self._with_retry(lambda: self.client.keyPress("bsp"))
+                time.sleep(0.1)
+
+                # Step 3: type password
+                with self.lock:
+                    self._with_retry(lambda: self.client.paste(password))
+                time.sleep(0.4)
+
+                # Step 4: submit
+                if click_arrow:
+                    try:
+                        with self.lock:
+                            self._with_retry(lambda: self.client.mouseMove(arrow_nx, arrow_ny))
+                            self._with_retry(lambda: self.client.mousePress(1))
+                        time.sleep(1.8)  # wait for desktop transition
+                    except Exception:
+                        # Arrow click failed; fall back to key return
+                        with self.lock:
+                            try:
+                                self._with_retry(lambda: self.client.keyPress("enter"))
+                            except Exception:
+                                pass
+                        time.sleep(2.0)
+                else:
+                    with self.lock:
+                        try:
+                            self._with_retry(lambda: self.client.keyPress("enter"))
+                        except Exception:
+                            pass
+                    time.sleep(2.0)
+
+                # Step 5: check lock state
+                check = self.detect_lock_screen()
+                last_screenshot = check.get("screenshot")
+                if check.get("ok") and not check.get("locked"):
+                    return {
+                        "ok": True, "unlocked": True, "attempts": attempts,
+                        "confidence_after": check.get("confidence"),
+                        "final_screenshot": last_screenshot,
+                    }
+
+                # Still locked — wait before retry
+                time.sleep(1.0)
+
+            except Exception as e:
+                # Non-fatal — continue to next attempt
+                last_screenshot = None
+                if attempts >= max_attempts:
+                    return {
+                        "ok": False, "unlocked": False, "attempts": attempts,
+                        "error": f"attempt {attempts} exception: {e}",
+                        "final_screenshot": last_screenshot,
+                    }
+                time.sleep(0.5)
+
+        return {
+            "ok": False, "unlocked": False, "attempts": attempts,
+            "error": "max attempts reached, still locked",
+            "final_screenshot": last_screenshot,
+        }
 
     def keepalive_loop(self):
         """Periodic micro-jiggle in screen center to prevent macOS lock."""
@@ -306,6 +560,18 @@ def run_daemon():
                 resp = d.key(req["key"])
             elif cmd == "status":
                 resp = d.status()
+            elif cmd == "detect_lock":
+                resp = d.detect_lock_screen(req.get("screenshot"))
+            elif cmd == "unlock":
+                pw = req.get("password", "")
+                if not pw:
+                    resp = {"ok": False, "error": "password required"}
+                else:
+                    resp = d.unlock(
+                        pw,
+                        max_attempts=req.get("max_attempts", 3),
+                        click_arrow=req.get("click_arrow", True),
+                    )
             else:
                 resp = {"ok": False, "error": f"unknown: {cmd}"}
 
@@ -430,6 +696,15 @@ def main():
     k = sub.add_parser("key")
     k.add_argument("key")
 
+    dl = sub.add_parser("detect-lock", help="Detect whether screen is locked")
+    dl.add_argument("--screenshot", "-s", help="Path to existing screenshot (optional; takes fresh if omitted)")
+
+    ul = sub.add_parser("unlock", help="Attempt to unlock the macOS lock screen")
+    ul.add_argument("password", help="Lock screen password")
+    ul.add_argument("--max-attempts", "-n", type=int, default=3)
+    ul.add_argument("--no-click-arrow", dest="click_arrow", action="store_false", default=True,
+                    help="Skip arrow-button click and use key return only")
+
     args = p.parse_args()
     {
         "start": cli_start, "stop": cli_stop,
@@ -443,6 +718,11 @@ def main():
         "move": lambda a: out(send({"cmd": "move", "x": a.x, "y": a.y, "space": a.space})),
         "type": lambda a: out(send({"cmd": "type", "text": a.text})),
         "key": lambda a: out(send({"cmd": "key", "key": a.key})),
+        "detect-lock": lambda a: out(send({"cmd": "detect_lock", "screenshot": getattr(a, "screenshot", None)})),
+        "unlock": lambda a: out(send({
+            "cmd": "unlock", "password": a.password,
+            "max_attempts": a.max_attempts, "click_arrow": a.click_arrow,
+        })),
     }[args.command](args)
 
 
