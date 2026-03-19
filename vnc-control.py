@@ -194,6 +194,188 @@ def get_profile(args):
     return getattr(args, "profile", None) or os.environ.get("VNC_PROFILE", DEFAULT_PROFILE)
 
 
+# ─── System dialog helpers (macOS) ────────────────────────────────────────────
+
+def detect_system_dialog():
+    """Check if a macOS system dialog (TCC/permission prompt) is visible.
+
+    Uses AppleScript to inspect UserNotificationCenter for open windows.
+    Returns dict with dialog info or None if no dialog present.
+    """
+    script = '''
+    tell application "System Events"
+        set dialogInfo to {}
+        try
+            set notifProc to process "UserNotificationCenter"
+            if (count of windows of notifProc) > 0 then
+                set w to window 1 of notifProc
+                set dialogTitle to ""
+                try
+                    set dialogTitle to name of w
+                end try
+                set btnStr to ""
+                try
+                    set allButtons to buttons of w
+                    repeat with b in allButtons
+                        set bLabel to ""
+                        try
+                            set bLabel to title of b
+                        end try
+                        if bLabel is "" or bLabel is missing value then
+                            try
+                                set bLabel to name of b
+                            end try
+                        end if
+                        if bLabel is not missing value and bLabel is not "" then
+                            if btnStr is not "" then set btnStr to btnStr & "|||"
+                            set btnStr to btnStr & bLabel
+                        end if
+                    end repeat
+                end try
+                set txtStr to ""
+                try
+                    set allTexts to static texts of w
+                    repeat with t in allTexts
+                        set tVal to ""
+                        try
+                            set tVal to value of t
+                        end try
+                        if tVal is not missing value and tVal is not "" then
+                            if txtStr is not "" then set txtStr to txtStr & "|||"
+                            set txtStr to txtStr & tVal
+                        end if
+                    end repeat
+                end try
+                return "DIALOG_FOUND|" & dialogTitle & "|BUTTONS:" & btnStr & "|TEXT:" & txtStr
+            end if
+        end try
+        return "NO_DIALOG"
+    end tell
+    '''
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=5
+        )
+        output = result.stdout.strip()
+        if output.startswith("DIALOG_FOUND"):
+            parts = output.split("|", 3)
+            title = parts[1] if len(parts) > 1 else ""
+            buttons_raw = parts[2].replace("BUTTONS:", "") if len(parts) > 2 else ""
+            text_raw = parts[3].replace("TEXT:", "") if len(parts) > 3 else ""
+            # Parse button names (|||  delimited)
+            buttons = [b.strip() for b in buttons_raw.split("|||") if b.strip()] if buttons_raw else []
+            return {
+                "visible": True,
+                "title": title,
+                "buttons": buttons,
+                "text": text_raw,
+                "process": "UserNotificationCenter",
+            }
+        return None
+    except Exception:
+        return None
+
+
+def dismiss_system_dialog(button_name="Allow"):
+    """Dismiss a macOS system dialog by clicking a named button via AppleScript.
+
+    Returns (success: bool, message: str).
+    """
+    # Normalize straight quotes to curly quotes for macOS dialog matching
+    # macOS uses ' (U+2019) in "Don't Allow" etc.
+    button_name_curly = button_name.replace("'", "\u2019").replace("'", "\u2019")
+    button_name_straight = button_name.replace("\u2019", "'").replace("\u2018", "'")
+
+    # Use title-based matching since macOS TCC dialogs use title, not name
+    script = f'''
+    tell application "System Events"
+        try
+            set w to window 1 of process "UserNotificationCenter"
+            set allButtons to buttons of w
+            repeat with b in allButtons
+                try
+                    set bTitle to title of b
+                    if bTitle is "{button_name}" or bTitle is "{button_name_curly}" or bTitle is "{button_name_straight}" then
+                        click b
+                        return "CLICKED"
+                    end if
+                end try
+            end repeat
+            -- Fallback: try by name
+            try
+                click button "{button_name}" of w
+                return "CLICKED"
+            end try
+            return "ERROR:Button \\"{button_name}\\" not found"
+        on error errMsg
+            return "ERROR:" & errMsg
+        end try
+    end tell
+    '''
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=5
+        )
+        output = result.stdout.strip()
+        if output == "CLICKED":
+            return True, f"Clicked '{button_name}' via AppleScript accessibility API"
+        else:
+            return False, output.replace("ERROR:", "").strip()
+    except subprocess.TimeoutExpired:
+        return False, "AppleScript timed out"
+    except Exception as e:
+        return False, str(e)
+
+
+def list_dialog_buttons():
+    """List all button names on the current system dialog.
+
+    Returns list of button name strings, or empty list if no dialog.
+    """
+    script = '''
+    tell application "System Events"
+        try
+            set notifProc to process "UserNotificationCenter"
+            if (count of windows of notifProc) > 0 then
+                set w to window 1 of notifProc
+                set btnStr to ""
+                set allButtons to buttons of w
+                repeat with b in allButtons
+                    set bLabel to ""
+                    try
+                        set bLabel to title of b
+                    end try
+                    if bLabel is "" or bLabel is missing value then
+                        try
+                            set bLabel to name of b
+                        end try
+                    end if
+                    if bLabel is not missing value and bLabel is not "" then
+                        if btnStr is not "" then set btnStr to btnStr & "|||"
+                        set btnStr to btnStr & bLabel
+                    end if
+                end repeat
+                return btnStr
+            end if
+        end try
+        return ""
+    end tell
+    '''
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=5
+        )
+        output = result.stdout.strip()
+        if output:
+            return [b.strip() for b in output.split("|||") if b.strip()]
+        return []
+    except Exception:
+        return []
+
+
 def normalize_key_name(key: str) -> str:
     """Normalize key aliases for better macOS ARD compatibility.
 
@@ -446,6 +628,9 @@ def cmd_click(args, config):
     button_map = {"left": "1", "right": "3", "middle": "2"}
     button = button_map.get(args.button, "1")
 
+    # Check for system dialog BEFORE clicking
+    dialog_before = detect_system_dialog()
+
     actions = ["move", str(nx), str(ny), "pause", "0.1", "click", button]
     if args.double:
         actions += ["pause", "0.1", "click", button]
@@ -469,6 +654,69 @@ def cmd_click(args, config):
         "duration_s": duration,
     }
 
+    # If a system dialog was visible before AND is still visible after VNC click,
+    # auto-fallback to AppleScript to dismiss it
+    dialog_fallback = None
+    if dialog_before and dialog_before.get("visible"):
+        time.sleep(0.3)
+        dialog_after = detect_system_dialog()
+        if dialog_after and dialog_after.get("visible"):
+            # VNC click didn't dismiss the dialog — fall back to AppleScript
+            # Try to figure out which button the user was targeting
+            target_button = getattr(args, "dialog_button", None)
+            if not target_button:
+                # Heuristic: prefer affirmative buttons in priority order
+                # Note: button parsing may miss some buttons, so also try
+                # directly via AppleScript with common affirmative names
+                available_buttons = dialog_after.get("buttons", [])
+                affirmative_priority = ["Allow", "OK", "Open", "Continue", "Yes", "Install", "Allow Always"]
+                for pref in affirmative_priority:
+                    if pref in available_buttons:
+                        target_button = pref
+                        break
+                if not target_button:
+                    # Try affirmative buttons directly even if not in parsed list
+                    # (parsing may miss them due to macOS accessibility quirks)
+                    for pref in affirmative_priority:
+                        test_ok, _ = dismiss_system_dialog(pref)
+                        if test_ok:
+                            dialog_fallback = {
+                                "triggered": True,
+                                "reason": "VNC click did not dismiss system dialog; auto-tried affirmative button",
+                                "button_clicked": pref,
+                                "method": "AppleScript accessibility API (affirmative scan)",
+                                "success": True,
+                                "message": f"Clicked '{pref}' via AppleScript",
+                                "dialog_info": dialog_before,
+                            }
+                            break
+                if not target_button and not dialog_fallback:
+                    if available_buttons:
+                        target_button = available_buttons[-1]  # rightmost = affirmative
+
+            if dialog_fallback:
+                pass  # already handled by affirmative scan above
+            elif target_button:
+                fallback_ok, fallback_msg = dismiss_system_dialog(target_button)
+                dialog_fallback = {
+                    "triggered": True,
+                    "reason": "VNC click did not dismiss system dialog (macOS blocks VNC mouse events on TCC/permission dialogs)",
+                    "button_clicked": target_button,
+                    "method": "AppleScript accessibility API",
+                    "success": fallback_ok,
+                    "message": fallback_msg,
+                    "dialog_info": dialog_before,
+                }
+            else:
+                dialog_fallback = {
+                    "triggered": False,
+                    "reason": "System dialog detected but no button target found",
+                    "dialog_info": dialog_after,
+                }
+
+    if dialog_fallback:
+        data["system_dialog_fallback"] = dialog_fallback
+
     if os.path.exists(verify_png):
         # Convert verify screenshot using active profile defaults
         _, fmt, default_scale, quality = capture_settings(args, prefer_last_scale=True)
@@ -478,7 +726,7 @@ def cmd_click(args, config):
         data["verify_image"] = get_image_info(out)
         data["profile"] = profile
 
-    if ok:
+    if ok or (dialog_fallback and dialog_fallback.get("success")):
         result_json(True, data)
     else:
         # Still return data even on failure (verify image might exist from partial run)
@@ -658,6 +906,82 @@ def cmd_combo(args, config):
         result_json(False, error=f"Combo failed: {stderr.strip()}", data={"verify_image": verify_info})
 
 
+def cmd_dialog(args, config):
+    """Detect, inspect, and dismiss macOS system dialogs.
+
+    Subactions:
+        detect  - Check if a system dialog is visible
+        dismiss - Click a button to dismiss (default: Allow)
+        list    - List available buttons on the dialog
+    """
+    subaction = args.subaction
+
+    if subaction == "detect":
+        dialog = detect_system_dialog()
+        if dialog:
+            result_json(True, {
+                "action": "dialog",
+                "subaction": "detect",
+                "dialog": dialog,
+            })
+        else:
+            result_json(True, {
+                "action": "dialog",
+                "subaction": "detect",
+                "dialog": None,
+                "message": "No system dialog visible",
+            })
+
+    elif subaction == "dismiss":
+        button_name = args.button_name or "Allow"
+        dialog = detect_system_dialog()
+        if not dialog:
+            result_json(True, {
+                "action": "dialog",
+                "subaction": "dismiss",
+                "message": "No system dialog to dismiss",
+            })
+            return
+
+        ok, msg = dismiss_system_dialog(button_name)
+        # Verify it's actually gone
+        time.sleep(0.3)
+        still_there = detect_system_dialog()
+
+        result_json(ok, {
+            "action": "dialog",
+            "subaction": "dismiss",
+            "button_clicked": button_name,
+            "method": "AppleScript accessibility API",
+            "success": ok,
+            "message": msg,
+            "dialog_before": dialog,
+            "dialog_still_visible": still_there is not None,
+        })
+
+    elif subaction == "list":
+        dialog = detect_system_dialog()
+        if not dialog:
+            result_json(True, {
+                "action": "dialog",
+                "subaction": "list",
+                "buttons": [],
+                "message": "No system dialog visible",
+            })
+            return
+
+        buttons = list_dialog_buttons()
+        result_json(True, {
+            "action": "dialog",
+            "subaction": "list",
+            "buttons": buttons,
+            "dialog": dialog,
+        })
+
+    else:
+        result_json(False, error=f"Unknown dialog subaction: {subaction}")
+
+
 def cmd_map(args, config):
     conv = convert_between_spaces(
         x=args.x,
@@ -803,6 +1127,13 @@ def main():
     p.add_argument("--quality", type=int, default=None,
                    help="Verify image quality (auto by profile when omitted)")
 
+    # dialog - detect/dismiss macOS system dialogs
+    p = sub.add_parser("dialog", help="Detect, inspect, and dismiss macOS system dialogs (TCC prompts)")
+    p.add_argument("subaction", choices=["detect", "dismiss", "list"],
+                   help="detect: check for visible dialog | dismiss: click a button | list: show available buttons")
+    p.add_argument("--button", dest="button_name", default=None,
+                   help="Button to click for dismiss (default: Allow)")
+
     # map
     p = sub.add_parser("map", help="Convert coordinates between spaces")
     p.add_argument("x", type=float)
@@ -828,6 +1159,7 @@ def main():
         "type": cmd_type,
         "key": cmd_key,
         "combo": cmd_combo,
+        "dialog": cmd_dialog,
         "map": cmd_map,
         "connect": cmd_connect,
         "status": cmd_status,
