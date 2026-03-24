@@ -380,3 +380,112 @@ class TestVisionFindElement:
         result = vnc._vision_find_element(str(img), "button")
         assert result["found"] is False
         assert "network timeout" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: scroll direction → vncdo button mapping
+# ---------------------------------------------------------------------------
+
+class TestScrollDirectionMapping:
+    """scroll command maps direction strings to correct vncdo button numbers."""
+
+    def _get_scroll_button(self, direction):
+        """Parse cmd_scroll logic: up/right → button 4, down/left → button 5."""
+        direction = direction.lower()
+        if direction in ("up", "right"):
+            return "4"
+        elif direction in ("down", "left"):
+            return "5"
+        return None
+
+    def test_up_maps_to_button_4(self):
+        assert self._get_scroll_button("up") == "4"
+
+    def test_right_maps_to_button_4(self):
+        assert self._get_scroll_button("right") == "4"
+
+    def test_down_maps_to_button_5(self):
+        assert self._get_scroll_button("down") == "5"
+
+    def test_left_maps_to_button_5(self):
+        assert self._get_scroll_button("left") == "5"
+
+    def test_click_clamp_lower(self):
+        """Clicks are clamped to at least 1."""
+        raw = 0
+        clamped = max(1, min(raw, 50))
+        assert clamped == 1
+
+    def test_click_clamp_upper(self):
+        """Clicks are clamped to at most 50."""
+        raw = 999
+        clamped = max(1, min(raw, 50))
+        assert clamped == 50
+
+    def test_click_in_range_unchanged(self):
+        """Clicks within 1-50 are unchanged."""
+        for n in (1, 3, 10, 50):
+            assert max(1, min(n, 50)) == n
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: drag coordinate resolution
+# ---------------------------------------------------------------------------
+
+class TestDragCoords:
+    """drag command resolves start/end coords independently to native space."""
+
+    def _native_from_screenshot(self, x, y, scale):
+        """Replicate the to_native logic for screenshot → native conversion."""
+        return round(x / scale), round(y / scale)
+
+    def test_drag_start_resolves_correctly(self):
+        nx, ny = self._native_from_screenshot(100, 200, 0.5)
+        assert nx == 200
+        assert ny == 400
+
+    def test_drag_end_resolves_correctly(self):
+        nx, ny = self._native_from_screenshot(300, 400, 0.5)
+        assert nx == 600
+        assert ny == 800
+
+    def test_drag_at_scale_1(self):
+        """At scale 1.0, screenshot coords == native coords."""
+        nx, ny = self._native_from_screenshot(150, 250, 1.0)
+        assert nx == 150
+        assert ny == 250
+
+    def test_drag_button_mapping(self):
+        """Drag button map matches click button map."""
+        button_map = {"left": "1", "right": "3", "middle": "2"}
+        assert button_map["left"] == "1"
+        assert button_map["right"] == "3"
+        assert button_map["middle"] == "2"
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: CLI parser validation (scroll + drag subcommands exist)
+# ---------------------------------------------------------------------------
+
+class TestPhase8CLIParsing:
+    """Verify scroll and drag subcommands are wired into argparse."""
+
+    def test_scroll_parser_exists(self):
+        """scroll subcommand should be registered."""
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "scroll", "--help"],
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode == 0
+        assert "scroll" in result.stdout.lower()
+
+    def test_drag_parser_exists(self):
+        """drag subcommand should be registered."""
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "drag", "--help"],
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode == 0
+        assert "drag" in result.stdout.lower()

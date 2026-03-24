@@ -1386,6 +1386,117 @@ def cmd_status(args, config):
         result_json(False, error=f"Host unreachable: {e}")
 
 
+def cmd_scroll(args, config):
+    """Scroll at a position using mouse wheel button events.
+
+    VNC mouse scroll is sent as button 4 (up) or 5 (down) clicks.
+    Each button press = one scroll notch.
+    """
+    space = "native" if getattr(args, "native", False) else getattr(args, "space", "screenshot")
+    nx, ny, native_w, native_h, used_scale = resolve_native_coords(args.x, args.y, space, config, scale=getattr(args, "scale", None))
+
+    direction = args.direction.lower()
+    if direction in ("up", "right"):
+        button = "4"
+    elif direction in ("down", "left"):
+        button = "5"
+    else:
+        result_json(False, error=f"Unknown scroll direction: {direction!r}. Use up/down/left/right.")
+        return
+
+    clicks = max(1, min(args.clicks, 50))  # clamp 1-50
+
+    # Build actions: move to position, then N button clicks with short pauses
+    actions = ["move", str(nx), str(ny), "pause", "0.1"]
+    for _ in range(clicks):
+        actions += ["click", button, "pause", "0.05"]
+
+    # Verify screenshot after scroll
+    verify_png = tmpfile("after-scroll", "png")
+    actions += ["pause", "0.2", "capture", verify_png]
+
+    ok, _, stderr, duration = run_vncdo(config, actions)
+
+    data = {
+        "action": "scroll",
+        "input_coords": {"space": space, "x": args.x, "y": args.y},
+        "native_coords": {"x": nx, "y": ny},
+        "native_resolution": {"w": native_w, "h": native_h},
+        "screenshot_scale_used": used_scale,
+        "direction": direction,
+        "clicks": clicks,
+        "vncdo_button": button,
+        "duration_s": duration,
+    }
+
+    if os.path.exists(verify_png):
+        _, fmt, default_scale, quality = capture_settings(args, prefer_last_scale=True)
+        s = used_scale if used_scale else default_scale
+        out = tmpfile("verify-scroll", "jpg" if fmt in ("jpeg", "jpg") else "png")
+        out = convert_screenshot(verify_png, out, fmt=fmt, scale=s, quality=quality)
+        data["verify_image"] = get_image_info(out)
+
+    if ok:
+        result_json(True, data)
+    else:
+        result_json(False, error=f"Scroll failed: {stderr.strip()}", data=data)
+
+
+def cmd_drag(args, config):
+    """Drag from (x1,y1) to (x2,y2) by holding the mouse button down.
+
+    Uses vncdo mousedown → drag → mouseup sequence.
+    The 'drag' action in vncdo moves the mouse in small steps (smoother).
+    """
+    space = "native" if getattr(args, "native", False) else getattr(args, "space", "screenshot")
+
+    nx1, ny1, native_w, native_h, used_scale = resolve_native_coords(
+        args.x1, args.y1, space, config, scale=getattr(args, "scale", None)
+    )
+    nx2, ny2, _, _, _ = resolve_native_coords(
+        args.x2, args.y2, space, config, scale=getattr(args, "scale", None)
+    )
+
+    button_map = {"left": "1", "right": "3", "middle": "2"}
+    button = button_map.get(getattr(args, "button", "left"), "1")
+
+    # Move to start, mousedown, drag to end, mouseup
+    verify_png = tmpfile("after-drag", "png")
+    actions = [
+        "move", str(nx1), str(ny1), "pause", "0.1",
+        "mousedown", button, "pause", "0.05",
+        "drag", str(nx2), str(ny2), "pause", "0.1",
+        "mouseup", button, "pause", "0.2",
+        "capture", verify_png,
+    ]
+
+    ok, _, stderr, duration = run_vncdo(config, actions)
+
+    data = {
+        "action": "drag",
+        "from": {"space": space, "x": args.x1, "y": args.y1},
+        "to": {"space": space, "x": args.x2, "y": args.y2},
+        "from_native": {"x": nx1, "y": ny1},
+        "to_native": {"x": nx2, "y": ny2},
+        "native_resolution": {"w": native_w, "h": native_h},
+        "screenshot_scale_used": used_scale,
+        "button": getattr(args, "button", "left"),
+        "duration_s": duration,
+    }
+
+    if os.path.exists(verify_png):
+        _, fmt, default_scale, quality = capture_settings(args, prefer_last_scale=True)
+        s = used_scale if used_scale else default_scale
+        out = tmpfile("verify-drag", "jpg" if fmt in ("jpeg", "jpg") else "png")
+        out = convert_screenshot(verify_png, out, fmt=fmt, scale=s, quality=quality)
+        data["verify_image"] = get_image_info(out)
+
+    if ok:
+        result_json(True, data)
+    else:
+        result_json(False, error=f"Drag failed: {stderr.strip()}", data=data)
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1506,6 +1617,34 @@ def main():
     p.add_argument("--scale", type=float, default=None)
     p.add_argument("--quality", type=int, default=None)
 
+    # scroll - Phase 8: mouse wheel scrolling
+    p = sub.add_parser("scroll", help="[Phase 8] Scroll at a position (mouse wheel)")
+    p.add_argument("x", type=float, help="X coordinate (screenshot space by default)")
+    p.add_argument("y", type=float, help="Y coordinate (screenshot space by default)")
+    p.add_argument("direction", choices=["up", "down", "left", "right"],
+                   help="Scroll direction")
+    p.add_argument("--clicks", type=int, default=3,
+                   help="Number of scroll notches (default: 3, max: 50)")
+    p.add_argument("--space", choices=["screenshot", "native", "normalized"], default="screenshot",
+                   help="Input coordinate space (default: screenshot)")
+    p.add_argument("--native", action="store_true", help="Alias for --space native")
+    p.add_argument("--scale", type=float, default=None,
+                   help="Screenshot scale used by coordinates (auto-detected if omitted)")
+
+    # drag - Phase 8: click-and-drag between two points
+    p = sub.add_parser("drag", help="[Phase 8] Drag from (x1,y1) to (x2,y2)")
+    p.add_argument("x1", type=float, help="Start X (screenshot space by default)")
+    p.add_argument("y1", type=float, help="Start Y (screenshot space by default)")
+    p.add_argument("x2", type=float, help="End X (screenshot space by default)")
+    p.add_argument("y2", type=float, help="End Y (screenshot space by default)")
+    p.add_argument("--button", default="left", choices=["left", "right", "middle"],
+                   help="Mouse button to hold during drag (default: left)")
+    p.add_argument("--space", choices=["screenshot", "native", "normalized"], default="screenshot",
+                   help="Input coordinate space (default: screenshot)")
+    p.add_argument("--native", action="store_true", help="Alias for --space native")
+    p.add_argument("--scale", type=float, default=None,
+                   help="Screenshot scale used by coordinates (auto-detected if omitted)")
+
     # sessions - list/show named session registry
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
@@ -1533,6 +1672,8 @@ def main():
         "find_element": cmd_find_element,
         "wait_for": cmd_wait_for,
         "assert_visible": cmd_assert_visible,
+        "scroll": cmd_scroll,
+        "drag": cmd_drag,
     }[args.command](args, config)
 
 

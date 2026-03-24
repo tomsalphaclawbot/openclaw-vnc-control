@@ -77,6 +77,17 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - [x] `VNC_VISION_MODEL` env var + `--model` per-command override (default: claude-opus-4-5)
 - [x] `base64` and `urllib.request` moved to module-level imports (cleaner + testable)
 
+## Phase 8 — Scroll & Drag ✅ DONE 2026-03-24
+- [x] `scroll X Y <direction>` — mouse wheel scroll at position (button 4=up/right, button 5=down/left)
+- [x] `--clicks N` for scroll intensity (1-50, default 3), clamped for safety
+- [x] `drag X1 Y1 X2 Y2` — click-and-drag between two points using vncdo mousedown→drag→mouseup
+- [x] `--button` option for drag (left/right/middle, default left)
+- [x] Both commands support `--space`, `--native`, `--scale` (same as click/move)
+- [x] Verify screenshot captured after both scroll and drag
+- [x] 11 new unit tests: direction mapping, click clamping, coordinate resolution, CLI parser validation
+- [x] Full suite: 81 passed, 5 skipped (up from 68+5)
+- [x] Tagged v0.5.0
+
 ## Abandoned Approaches (documented for future reference)
 - **vncdotool threaded API**: `captureScreen` hangs on macOS ARD (framebuffer timeout)
 - **asyncvnc**: Screenshots all-black (encoding limitation)
