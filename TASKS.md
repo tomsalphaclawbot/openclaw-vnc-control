@@ -66,11 +66,11 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 - [DONE] Symlinked into workspace skills dir
 - [DONE] TOOLS.md credential security fix (removed plaintext, reference .env/Bitwarden)
 
-## Sprint F — Hardening (next)
+## Sprint F — Hardening ✅ DONE
 - [DONE] Automated e2e smoke test — tests/test_unit.py (31 tests) + tests/test_integration.py (8 tests, VNC-skip-safe); pytest.ini wired; 39/39 green (2026-03-18)
-- [TODO] Test against non-macOS VNC target
-- [TODO] CI workflow (GitHub Actions: run unit tests on push; integration tests gate-kept behind VNC_HOST secret)
-- [TODO] Tagged v0.1.0 release
+- [DEFERRED] Test against non-macOS VNC target — no external target available; documented as limitation
+- [DONE] CI workflow — .github/workflows/ci.yml: unit tests on every push/PR; integration tests gated on VNC_HOST secret (2026-03-24)
+- [DONE] Tagged v0.1.0 release (2026-03-24)
 
 ---
 
