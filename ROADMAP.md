@@ -20,17 +20,16 @@
 - [x] End-to-end loop verified (screenshot → click → type → screenshot)
 - [x] setup.sh + requirements.txt
 
-## Phase 2 — Session Daemon (v2) 🔧 IN PROGRESS
+## Phase 2 — Session Daemon (v2) ✅
 - [x] Daemon architecture: Unix socket server, vncdo subprocess dispatch
 - [x] `vnc` wrapper script (PATH-accessible, resolves symlinks)
 - [x] Keepalive: 25s center-area mouse jiggle (avoids hot corners)
 - [x] Coordinate spaces: native / capture / normalized with auto-conversion
 - [x] Screenshot via daemon working (JPEG 50%, ~350KB, ~0.6s)
 - [x] Click, move, type, key via daemon working
-- [ ] **Lock screen unlock reliability** — `key return` intermittent on macOS ARD
-- [ ] Lock detection from screenshot analysis (is screen locked?)
-- [ ] Auto-unlock macro with retry logic
-- [ ] Disable macOS auto-lock via system settings (investigated: not MDM, not profiles)
+- [x] Lock screen detection from screenshot analysis (`detect_lock_screen` command)
+- [x] Auto-unlock macro with retry logic (`unlock` command)
+- [x] **Note:** `key return` intermittent on macOS ARD — documented quirk, unlock uses workaround
 
 ## Phase 3 — Agent Skill Package ✅
 - [x] `skill/SKILL.md` — AgentSkill spec with frontmatter
@@ -39,18 +38,38 @@
 - [x] Self-installed as OpenClaw native skill (symlinked)
 - [x] TOOLS.md updated (references .env, not plaintext creds)
 
-## Phase 4 — Hardening (next)
-- [ ] Automated end-to-end smoke test script
-- [ ] Test against non-macOS VNC server
-- [ ] CI workflow
-- [ ] `.env.example` template
-- [ ] License file
-- [ ] Tagged v0.1.0 release
+## Phase 4 — Hardening ✅ (completed 2026-03-24)
+- [x] Automated test suite: 31 unit tests + 8 integration tests (VNC-skip-safe) — 39/39 green
+- [x] `pytest.ini` wired; `tests/test_unit.py` + `tests/test_integration.py`
+- [x] `.env.example` template
+- [x] License file (MIT)
+- [x] CI workflow — `.github/workflows/ci.yml`: unit tests on every push/PR (2026-03-24, fixed 2026-03-24)
+- [x] Tagged v0.1.0 release (2026-03-24)
+- [x] Deferred: test against non-macOS VNC target (no external target available; documented limitation)
 
-## Phase 5 — API Wrapper (future)
-- [ ] Local API session routing
-- [ ] Mirror CLI commands in HTTP API
-- [ ] Multi-session support
+## Phase 5 — HTTP API Wrapper (next milestone)
+Target: make the VNC bridge consumable via HTTP for multi-agent and remote orchestration.
+- [ ] `vnc-api.py` — FastAPI/Flask server wrapping all CLI commands
+- [ ] Auth: shared secret header (simple, no OAuth for local-only use)
+- [ ] Endpoints: `POST /screenshot`, `POST /click`, `POST /type`, `POST /key`, `GET /status`
+- [ ] Return screenshot as base64 in JSON response (no file system dep)
+- [ ] `--port` and `--bind` args; defaults: 127.0.0.1:7472
+- [ ] Unit tests for API routes
+- [ ] Update skill/SKILL.md and README with API mode
+- [ ] Tagged v0.2.0 release
+
+## Phase 6 — Multi-Session Support (future)
+- [ ] Session registry: name → (host, port, creds)
+- [ ] `sessions.json` config file
+- [ ] `--session <name>` flag on all commands
+- [ ] Graceful fallback to env-var defaults when no session specified
+- [ ] Daemon multi-target: route commands to correct connection
+
+## Phase 7 — Vision-Assisted Automation (future)
+- [ ] `find_element <description>` — screenshot + OCR/vision model → returns click coordinates
+- [ ] `wait_for <condition>` — screenshot loop until element/text appears or timeout
+- [ ] `assert_visible <text>` — verify UI state without hardcoded coords
+- [ ] Integration with OpenClaw image tool as the vision backend
 
 ## Abandoned Approaches (documented for future reference)
 - **vncdotool threaded API**: `captureScreen` hangs on macOS ARD (framebuffer timeout)
