@@ -47,14 +47,14 @@
 - [x] Tagged v0.1.0 release (2026-03-24)
 - [x] Deferred: test against non-macOS VNC target (no external target available; documented limitation)
 
-## Phase 5 — HTTP API Wrapper (next milestone)
+## Phase 5 — HTTP API Wrapper ✅ COMPLETE 2026-03-24
 Target: make the VNC bridge consumable via HTTP for multi-agent and remote orchestration.
-- [ ] `vnc-api.py` — FastAPI/Flask server wrapping all CLI commands
-- [ ] Auth: shared secret header (simple, no OAuth for local-only use)
-- [ ] Endpoints: `POST /screenshot`, `POST /click`, `POST /type`, `POST /key`, `GET /status`
-- [ ] Return screenshot as base64 in JSON response (no file system dep)
-- [ ] `--port` and `--bind` args; defaults: 127.0.0.1:7472
-- [ ] Unit tests for API routes
+- [x] `vnc_api.py` — FastAPI server wrapping all CLI commands (shim: `vnc-api.py`)
+- [x] Auth: shared secret header via `X-VNC-API-Secret` (env: `VNC_API_SECRET`)
+- [x] Endpoints: `GET /status`, `POST /screenshot`, `POST /click`, `POST /move`, `POST /type`, `POST /key`
+- [x] Return screenshot as base64 in JSON response (no filesystem dep for callers)
+- [x] `--port` and `--bind` args; defaults: 127.0.0.1:7472
+- [x] Unit tests for API routes — 13/13 passing (`tests/test_vnc_api.py`)
 - [ ] Update skill/SKILL.md and README with API mode
 - [ ] Tagged v0.2.0 release
 
