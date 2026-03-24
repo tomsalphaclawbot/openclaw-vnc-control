@@ -111,3 +111,13 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 5. Commit all v2 changes and push ← next
 6. Live test detect-lock + unlock against a locked macOS ARD session
 7. Sprint F: automated e2e smoke test, tagged v0.1.0 release
+
+## Sprint G — Phase 7 Vision-Assisted Automation ✅ DONE 2026-03-24
+- [DONE] `_vision_find_element()`: screenshot → Anthropic vision API → parsed coordinates
+- [DONE] `find_element <description>`: locate UI element by natural language, return x/y in screenshot space + native coords
+- [DONE] `wait_for <description>`: poll loop with --timeout (default 30s) + --interval (default 2s) until element found or timeout
+- [DONE] `assert_visible <description>`: single-shot assertion, exit 0=found / 1=not found
+- [DONE] Markdown fence stripping (models wrap JSON in ```code blocks```)
+- [DONE] --model flag + VNC_VISION_MODEL env override; default model: claude-opus-4-5
+- [DONE] 6 new unit tests; 37/37 unit, 65/65 total — no regressions
+- [DONE] Tagged v0.4.0
