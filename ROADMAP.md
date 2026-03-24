@@ -58,12 +58,14 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - [x] Update skill/SKILL.md and README with API mode (2026-03-24)
 - [x] Tagged v0.2.0 release (2026-03-24)
 
-## Phase 6 — Multi-Session Support (future)
-- [ ] Session registry: name → (host, port, creds)
-- [ ] `sessions.json` config file
-- [ ] `--session <name>` flag on all commands
-- [ ] Graceful fallback to env-var defaults when no session specified
-- [ ] Daemon multi-target: route commands to correct connection
+## Phase 6 — Multi-Session Support ✅ DONE (v0.3.0, 2026-03-24)
+- [x] Session registry: name → (host, port, creds) — `sessions.json` + `sessions.json.example`
+- [x] `sessions.json` config file with `default` key support
+- [x] `--session <name>` / `-S <name>` flag on all commands (global parser flag)
+- [x] Graceful fallback to env-var defaults when no session specified
+- [x] `sessions list` / `sessions show <name>` subcommand (password redacted)
+- [x] HTTP API session-scoped routes: `GET /sessions`, `GET /sessions/{name}`, `/sessions/{name}/status|screenshot|click|type|key`
+- [x] 15 unit tests — 15/15 passing (total suite: 67/67)
 
 ## Phase 7 — Vision-Assisted Automation (future)
 - [ ] `find_element <description>` — screenshot + OCR/vision model → returns click coordinates

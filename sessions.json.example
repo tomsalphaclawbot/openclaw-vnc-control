@@ -1,0 +1,25 @@
+{
+  "_comment": "Multi-session registry for vnc-control. Copy to sessions.json and fill in credentials.",
+  "_note": "sessions.json is gitignored — never commit real credentials.",
+  "default": "local",
+  "sessions": {
+    "local": {
+      "host": "127.0.0.1",
+      "port": "5900",
+      "username": "your_username",
+      "password": "your_password"
+    },
+    "office": {
+      "host": "192.168.1.100",
+      "port": "5900",
+      "username": "admin",
+      "password": ""
+    },
+    "pi": {
+      "host": "raspberrypi.local",
+      "port": "5901",
+      "username": "pi",
+      "password": ""
+    }
+  }
+}

@@ -72,9 +72,57 @@ def load_dotenv():
 
 load_dotenv()
 
+# ─── Session registry (multi-target) ─────────────────────────────────────────
+
+SESSIONS_FILE = Path(__file__).parent / "sessions.json"
+
+
+def load_sessions_config():
+    """Load sessions.json if present. Returns dict with 'sessions' and 'default' keys."""
+    if not SESSIONS_FILE.exists():
+        return {"default": None, "sessions": {}}
+    try:
+        data = json.loads(SESSIONS_FILE.read_text())
+        return {
+            "default": data.get("default"),
+            "sessions": data.get("sessions", {}),
+        }
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": f"sessions.json parse error: {e}"}), file=sys.stderr)
+        return {"default": None, "sessions": {}}
+
+
+def resolve_session(session_name):
+    """Resolve a named session to its config dict. Returns None if not found."""
+    cfg = load_sessions_config()
+    name = session_name or cfg.get("default")
+    if name and name in cfg["sessions"]:
+        return cfg["sessions"][name]
+    return None
+
+
+def list_sessions():
+    """Return list of known session names."""
+    cfg = load_sessions_config()
+    return list(cfg["sessions"].keys()), cfg.get("default")
+
+
 # ─── Connection ───────────────────────────────────────────────────────────────
 
 def get_config(args):
+    # If --session specified, load from sessions.json first
+    session_name = getattr(args, "session", None)
+    session_cfg = resolve_session(session_name) if session_name else None
+
+    if session_cfg:
+        # Named session wins — args can still override individual fields
+        return {
+            "host": getattr(args, "host", None) or session_cfg.get("host", "127.0.0.1"),
+            "port": getattr(args, "port", None) or session_cfg.get("port", "5900"),
+            "password": getattr(args, "password", None) or session_cfg.get("password", ""),
+            "username": getattr(args, "username", None) or session_cfg.get("username", ""),
+        }
+
     return {
         "host": getattr(args, "host", None) or os.environ.get("VNC_HOST", "127.0.0.1"),
         "port": getattr(args, "port", None) or os.environ.get("VNC_PORT", "5900"),
@@ -1068,6 +1116,8 @@ def main():
     parser.add_argument("--port", help="VNC port (default: $VNC_PORT or 5900)")
     parser.add_argument("--password", help="VNC password (default: $VNC_PASSWORD)")
     parser.add_argument("--username", help="VNC/ARD username (default: $VNC_USERNAME)")
+    parser.add_argument("--session", "-S",
+                        help="Named session from sessions.json (overrides env/arg host/port/creds)")
     parser.add_argument("--profile", choices=["manual", "ai"], default=os.environ.get("VNC_PROFILE", DEFAULT_PROFILE),
                         help="Behavior profile: manual (flexible) or ai (efficiency-locked)")
 
@@ -1149,8 +1199,18 @@ def main():
     # status
     sub.add_parser("status", help="TCP reachability check")
 
+    # sessions - list/show named session registry
+    p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
+    p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
+                   help="list: show all sessions | show NAME: show a specific session config")
+    p.add_argument("name", nargs="?", default=None, help="Session name for 'show'")
+
     args = parser.parse_args()
     config = get_config(args)
+
+    if args.command == "sessions":
+        _cmd_sessions(args)
+        return
 
     {
         "screenshot": cmd_screenshot,
@@ -1164,6 +1224,33 @@ def main():
         "connect": cmd_connect,
         "status": cmd_status,
     }[args.command](args, config)
+
+
+def _cmd_sessions(args):
+    """Handle the 'sessions' subcommand."""
+    subaction = getattr(args, "subaction", "list") or "list"
+    name = getattr(args, "name", None)
+    sessions, default = list_sessions()
+
+    if subaction == "show" and name:
+        cfg = resolve_session(name)
+        if cfg is None:
+            result_json(False, error=f"Session '{name}' not found. Known sessions: {sessions}")
+        else:
+            # Redact password for display
+            display = {**cfg}
+            if display.get("password"):
+                display["password"] = "***"
+            result_json(True, {"session": name, "config": display, "default": name == default})
+    else:
+        if not sessions:
+            result_json(True, {
+                "sessions": [],
+                "default": None,
+                "note": "No sessions.json found. Copy sessions.json.example to sessions.json to get started.",
+            })
+        else:
+            result_json(True, {"sessions": sessions, "default": default, "count": len(sessions)})
 
 
 if __name__ == "__main__":

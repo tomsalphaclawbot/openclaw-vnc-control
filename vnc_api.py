@@ -58,7 +58,7 @@ API_SECRET = os.environ.get("VNC_API_SECRET", "")
 app = FastAPI(
     title="vnc-control HTTP API",
     description="HTTP bridge for VNC automation via vnc-control.py",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 # ─── Auth middleware ──────────────────────────────────────────────────────────
@@ -222,6 +222,90 @@ async def key(req: KeyRequest):
     """Send one or more key events (e.g. ['ctrl', 'c'] or ['enter'])."""
     args = ["key"] + req.keys
     return _run(args)
+
+
+# ─── Session-scoped routes ────────────────────────────────────────────────────
+
+def _session_args(session: Optional[str]) -> List[str]:
+    """Return --session flag args if a named session is specified."""
+    if session:
+        return ["--session", session]
+    return []
+
+
+@app.get("/sessions")
+async def list_sessions_endpoint():
+    """List named sessions from sessions.json."""
+    return _run(["sessions", "list"])
+
+
+@app.get("/sessions/{name}")
+async def show_session(name: str):
+    """Show config for a named session (password redacted)."""
+    return _run(["sessions", "show", name])
+
+
+@app.get("/sessions/{name}/status")
+async def session_status(name: str):
+    """Check TCP reachability for a named session."""
+    return _run(_session_args(name) + ["status"])
+
+
+@app.post("/sessions/{name}/screenshot")
+async def session_screenshot(name: str, req: ScreenshotRequest = ScreenshotRequest()):
+    """Capture screenshot from a named session."""
+    import tempfile
+
+    use_tmp = req.out is None
+    out_path = req.out or str(Path(tempfile.mktemp(suffix=f".{req.format}")))
+
+    args = _session_args(name) + [
+        "--profile", "ai",
+        "screenshot",
+        "--format", req.format,
+        "--scale", str(req.scale),
+        "--quality", str(req.quality),
+        "--out", out_path,
+    ]
+
+    result = _run(args, timeout=25)
+
+    if result.get("ok") and use_tmp:
+        path = Path(result.get("path", out_path))
+        if path.exists():
+            raw = path.read_bytes()
+            b64 = base64.b64encode(raw).decode()
+            result["image_b64"] = b64
+            result["image_format"] = req.format
+            result["image_size_bytes"] = len(raw)
+            try:
+                path.unlink()
+            except Exception:
+                pass
+
+    return result
+
+
+@app.post("/sessions/{name}/click")
+async def session_click(name: str, req: ClickRequest):
+    """Click at (x, y) on a named session."""
+    args = _session_args(name) + ["click", str(req.x), str(req.y), "--space", req.space]
+    return _run(args)
+
+
+@app.post("/sessions/{name}/type")
+async def session_type(name: str, req: TypeRequest):
+    """Type text on a named session."""
+    args = _session_args(name) + ["type", req.text]
+    return _run(args)
+
+
+@app.post("/sessions/{name}/key")
+async def session_key(name: str, req: KeyRequest):
+    """Send key events to a named session."""
+    args = _session_args(name) + ["key"] + req.keys
+    return _run(args)
+
 
 # ─── Entrypoint ──────────────────────────────────────────────────────────────
 
