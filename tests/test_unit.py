@@ -489,3 +489,135 @@ class TestPhase8CLIParsing:
         )
         assert result.returncode == 0
         assert "drag" in result.stdout.lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase 9: Image diff (cmd_diff) — pure-Python, no VNC required
+# ---------------------------------------------------------------------------
+
+class TestPhase9ImageDiff:
+    """Tests for cmd_diff — image change detection and bounding box computation."""
+
+    def _make_solid_image(self, tmp_path, color, name="img.png", size=(200, 150)):
+        """Create a solid-color PNG image."""
+        from PIL import Image
+        img = Image.new("RGB", size, color)
+        p = tmp_path / name
+        img.save(str(p))
+        return str(p)
+
+    def test_identical_images_no_change(self, tmp_path):
+        """Identical images → 0% change, no bounding box, changed=False."""
+        a = self._make_solid_image(tmp_path, (128, 128, 128), "a.png")
+        b = self._make_solid_image(tmp_path, (128, 128, 128), "b.png")
+        out = str(tmp_path / "diff.png")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "diff", a, b, "--out", out],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        assert data["changed"] is False
+        assert data["change_pct"] == 0.0
+        assert data["bounding_box"] is None
+
+    def test_fully_changed_image(self, tmp_path):
+        """White vs black image → ~100% change."""
+        a = self._make_solid_image(tmp_path, (0, 0, 0), "a.png")
+        b = self._make_solid_image(tmp_path, (255, 255, 255), "b.png")
+        out = str(tmp_path / "diff.png")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "diff", a, b, "--out", out],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        assert data["changed"] is True
+        assert data["change_pct"] == 100.0
+        assert data["bounding_box"] is not None
+
+    def test_partial_change_has_bbox(self, tmp_path):
+        """Red rectangle added to image → bbox covers only changed area."""
+        from PIL import Image, ImageDraw
+        size = (200, 150)
+        img_a = Image.new("RGB", size, (200, 200, 200))
+        p_a = tmp_path / "a.png"
+        img_a.save(str(p_a))
+
+        img_b = img_a.copy()
+        draw = ImageDraw.Draw(img_b)
+        draw.rectangle([(50, 40), (100, 90)], fill=(255, 0, 0))
+        p_b = tmp_path / "b.png"
+        img_b.save(str(p_b))
+
+        out = str(tmp_path / "diff.png")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "diff", str(p_a), str(p_b), "--out", out],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        assert data["changed"] is True
+        assert data["change_pct"] > 0
+        assert data["change_pct"] < 100  # only partial change
+        bb = data["bounding_box"]
+        assert bb is not None
+        assert bb["x"] >= 50
+        assert bb["y"] >= 40
+        assert bb["x2"] <= 100
+        assert bb["y2"] <= 90
+
+    def test_threshold_suppresses_noise(self, tmp_path):
+        """Near-identical images with tiny variation should show 0% with high threshold."""
+        from PIL import Image
+        size = (100, 100)
+        img_a = Image.new("RGB", size, (128, 128, 128))
+        img_b = Image.new("RGB", size, (130, 128, 128))  # only +2 on R channel
+        p_a = tmp_path / "a.png"
+        p_b = tmp_path / "b.png"
+        img_a.save(str(p_a))
+        img_b.save(str(p_b))
+
+        out = str(tmp_path / "diff.png")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "diff", str(p_a), str(p_b),
+             "--threshold", "5", "--out", out],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        # +2 difference < threshold 5 → treated as no change
+        assert data["changed"] is False
+
+    def test_overlay_image_written(self, tmp_path):
+        """Overlay file is created and has non-zero size."""
+        a = self._make_solid_image(tmp_path, (0, 0, 0), "a.png")
+        b = self._make_solid_image(tmp_path, (255, 0, 0), "b.png")
+        out = str(tmp_path / "diff.png")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "diff", a, b, "--out", out],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["overlay_image"]["path"] == out
+        import os
+        assert os.path.exists(out)
+        assert os.path.getsize(out) > 0
+
+    def test_diff_parser_exists(self):
+        """diff subcommand should be registered in argparse."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "diff", "--help"],
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode == 0
+        assert "diff" in result.stdout.lower()
+        assert "before" in result.stdout.lower()
+        assert "after" in result.stdout.lower()
+
+
+import subprocess

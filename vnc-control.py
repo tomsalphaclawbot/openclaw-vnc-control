@@ -1442,6 +1442,109 @@ def cmd_scroll(args, config):
         result_json(False, error=f"Scroll failed: {stderr.strip()}", data=data)
 
 
+def cmd_diff(args, _config):
+    """Phase 9: image diff — compare two screenshots and report changed regions.
+
+    Loads both images (auto-resize if needed), computes per-pixel absolute diff,
+    applies a threshold, then returns:
+      - changed_pixels / total_pixels (change_pct)
+      - bounding box of changed region (may be None if no changes)
+      - path to annotated diff overlay image (highlights changes in red)
+      - per-channel mean diff for quick signal
+    """
+    try:
+        from PIL import Image, ImageDraw
+        import numpy as np
+    except ImportError:
+        result_json(False, error="Phase 9 requires Pillow and numpy (pip install Pillow numpy)")
+        return
+
+    before_path = args.before
+    after_path = args.after
+    threshold = getattr(args, "threshold", 10)
+    out_path = getattr(args, "out", None) or tmpfile("diff-overlay", "png")
+
+    # Load images
+    try:
+        img_a = Image.open(before_path).convert("RGB")
+        img_b = Image.open(after_path).convert("RGB")
+    except Exception as e:
+        result_json(False, error=f"Failed to open image(s): {e}")
+        return
+
+    # Resize b to match a if dimensions differ
+    if img_a.size != img_b.size:
+        img_b = img_b.resize(img_a.size, Image.LANCZOS)
+
+    w, h = img_a.size
+    arr_a = np.array(img_a, dtype=np.int32)
+    arr_b = np.array(img_b, dtype=np.int32)
+
+    # Per-pixel absolute diff (max across channels)
+    diff = np.abs(arr_b - arr_a)
+    diff_max = diff.max(axis=2)  # shape (h, w)
+
+    mask = diff_max >= threshold
+    changed_pixels = int(mask.sum())
+    total_pixels = w * h
+    change_pct = round(changed_pixels / total_pixels * 100, 4) if total_pixels else 0
+
+    # Bounding box of changed region
+    bbox = None
+    if changed_pixels > 0:
+        rows = np.any(mask, axis=1)
+        cols = np.any(mask, axis=0)
+        row_idxs = np.where(rows)[0]
+        col_idxs = np.where(cols)[0]
+        rmin, rmax = int(row_idxs[0]), int(row_idxs[-1])
+        cmin, cmax = int(col_idxs[0]), int(col_idxs[-1])
+        bbox = {"x": cmin, "y": rmin, "x2": cmax, "y2": rmax,
+                "width": cmax - cmin + 1, "height": rmax - rmin + 1}
+
+    # Per-channel mean diff
+    mean_diff = {
+        "r": round(float(diff[:, :, 0].mean()), 3),
+        "g": round(float(diff[:, :, 1].mean()), 3),
+        "b": round(float(diff[:, :, 2].mean()), 3),
+    }
+
+    # Annotated overlay: blend diff highlight in red over after-image
+    overlay = img_b.copy()
+    overlay_arr = np.array(overlay, dtype=np.uint8)
+    # Red highlight at changed pixels (intensity proportional to diff_max, clamped)
+    intensity = np.clip(diff_max * 3, 0, 255).astype(np.uint8)
+    overlay_arr[mask, 0] = np.clip(overlay_arr[mask, 0].astype(np.int32) + intensity[mask], 0, 255).astype(np.uint8)
+    overlay_arr[mask, 1] = (overlay_arr[mask, 1] * 0.4).astype(np.uint8)
+    overlay_arr[mask, 2] = (overlay_arr[mask, 2] * 0.4).astype(np.uint8)
+    overlay = Image.fromarray(overlay_arr)
+
+    # Draw bounding box rectangle if changed region exists
+    if bbox:
+        draw = ImageDraw.Draw(overlay)
+        draw.rectangle(
+            [(bbox["x"], bbox["y"]), (bbox["x2"], bbox["y2"])],
+            outline=(255, 80, 0), width=3
+        )
+
+    overlay.save(str(out_path))
+
+    result_json(True, {
+        "action": "diff",
+        "before": str(before_path),
+        "after": str(after_path),
+        "image_size": {"width": w, "height": h},
+        "threshold": threshold,
+        "changed_pixels": changed_pixels,
+        "total_pixels": total_pixels,
+        "change_pct": change_pct,
+        "changed": changed_pixels > 0,
+        "bounding_box": bbox,
+        "mean_diff_per_channel": mean_diff,
+        "overlay_image": get_image_info(str(out_path)),
+        "tip": "change_pct > 1% typically indicates visible UI change; bounding_box gives region to inspect.",
+    })
+
+
 def cmd_drag(args, config):
     """Drag from (x1,y1) to (x2,y2) by holding the mouse button down.
 
@@ -1631,6 +1734,15 @@ def main():
     p.add_argument("--scale", type=float, default=None,
                    help="Screenshot scale used by coordinates (auto-detected if omitted)")
 
+    # diff - Phase 9: image diff between two screenshots
+    p = sub.add_parser("diff", help="[Phase 9] Compare two screenshots and report changed regions")
+    p.add_argument("before", help="Path to before-screenshot (reference image)")
+    p.add_argument("after", help="Path to after-screenshot (image to compare)")
+    p.add_argument("--threshold", type=int, default=10,
+                   help="Pixel change threshold (0-255, default: 10). Lower = more sensitive.")
+    p.add_argument("--out", default=None,
+                   help="Output path for annotated diff overlay image (default: auto-temp)")
+
     # drag - Phase 8: click-and-drag between two points
     p = sub.add_parser("drag", help="[Phase 8] Drag from (x1,y1) to (x2,y2)")
     p.add_argument("x1", type=float, help="Start X (screenshot space by default)")
@@ -1674,6 +1786,7 @@ def main():
         "assert_visible": cmd_assert_visible,
         "scroll": cmd_scroll,
         "drag": cmd_drag,
+        "diff": cmd_diff,
     }[args.command](args, config)
 
 

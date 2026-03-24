@@ -93,3 +93,13 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - **asyncvnc**: Screenshots all-black (encoding limitation)
 - **vncdo stdin mode**: Can't interleave commands (batch-then-exit only)
 - **Persistent connection pooling**: All tested persistent approaches fail on macOS ARD
+
+## Phase 9 — Image Diffing / Change Detection ✅ DONE 2026-03-24
+- [x] `diff <before> <after>` — compare two screenshots pixel-by-pixel
+- [x] `--threshold N` — configurable change sensitivity (default: 10/255)
+- [x] Returns: `changed`, `change_pct`, `changed_pixels`, `total_pixels`, `bounding_box`, `mean_diff_per_channel`
+- [x] Bounding box covers minimal rectangle enclosing all changed pixels (x, y, x2, y2, width, height)
+- [x] Annotated overlay image: after-image with red highlights on changed regions + orange bbox rectangle
+- [x] Auto-resize if before/after differ in dimensions (handles screenshot scale changes)
+- [x] 6 unit tests (56/56 total passing + 5 skipped integration)
+- [x] Tagged v0.6.0
