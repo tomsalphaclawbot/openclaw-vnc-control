@@ -55,8 +55,8 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - [x] Return screenshot as base64 in JSON response (no filesystem dep for callers)
 - [x] `--port` and `--bind` args; defaults: 127.0.0.1:7472
 - [x] Unit tests for API routes — 13/13 passing (`tests/test_vnc_api.py`)
-- [ ] Update skill/SKILL.md and README with API mode
-- [ ] Tagged v0.2.0 release
+- [x] Update skill/SKILL.md and README with API mode (2026-03-24)
+- [x] Tagged v0.2.0 release (2026-03-24)
 
 ## Phase 6 — Multi-Session Support (future)
 - [ ] Session registry: name → (host, port, creds)
