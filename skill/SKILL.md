@@ -1,6 +1,6 @@
 ---
 name: vnc-control
-description: Control remote desktops via VNC for AI agent visual automation. Use when an AI agent needs to see, click, type, or interact with a remote desktop, native app, permission dialog, installer, or any GUI that APIs can't reach. Provides screenshot capture (PNG/JPEG with scaling), pointer move/click, keyboard type/key, lock screen detection, and auto-unlock. Supports both one-shot CLI (vnc-control.py) and persistent session daemon (vnc) modes. Designed for the observe→decide→act→verify agent loop.
+description: Control remote desktops via VNC for AI agent visual automation. Use when an AI agent needs to see, click, type, or interact with a remote desktop, native app, permission dialog, installer, or any GUI that APIs can't reach. Provides screenshot capture (PNG/JPEG with scaling), pointer move/click, keyboard type/key, lock screen detection, auto-unlock, and HTTP API mode for multi-agent/remote orchestration. Supports one-shot CLI (vnc-control.py), persistent session daemon (vnc), and HTTP API server (vnc_api.py) modes. Designed for the observe→decide→act→verify agent loop.
 ---
 
 # VNC Control
@@ -9,12 +9,13 @@ Visual bridge for AI agents to control remote desktops via VNC. The tool capture
 
 ## Modes
 
-Two execution modes are available:
+Three execution modes are available:
 
 | Mode | Tool | When to use |
 |------|------|-------------|
 | **One-shot CLI** | `python3 vnc-control.py` | Quick scripts, single commands, no persistent state needed |
 | **Session daemon** | `vnc` (wrapper) | Agent loops, keepalive, lock detection/unlock, faster repeated commands |
+| **HTTP API server** | `python3 vnc_api.py` | Multi-agent orchestration, remote callers, programmatic automation over HTTP |
 
 ---
 
@@ -226,6 +227,96 @@ Prefer `--format jpeg --scale 0.5` for agent loops — all text and UI elements 
 - For agent runs, prefer daemon mode + `--scale 0.5` for efficient capture
 - Lock/unlock native coordinates are calibrated for 3420×2214 (MacBook Air); adjust for other resolutions
 
+---
+
+## HTTP API Server (vnc_api.py)
+
+The HTTP API wraps all CLI commands in a FastAPI server, making the VNC bridge callable over HTTP from any agent, service, or remote orchestrator.
+
+### Start the server
+
+```bash
+# Default: 127.0.0.1:7472, no auth
+python3 vnc_api.py
+
+# Custom port + bind + optional shared secret
+python3 vnc_api.py --port 8080 --bind 0.0.0.0
+
+# With auth (recommended for non-localhost)
+VNC_API_SECRET=mysecret python3 vnc_api.py
+```
+
+### Authentication
+
+Set `VNC_API_SECRET` in the environment. When set, all POST requests must include:
+```
+X-VNC-API-Secret: <your-secret>
+```
+Requests without a valid secret return `403 Forbidden`.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/status` | Health check + VNC connection probe |
+| `POST` | `/screenshot` | Capture framebuffer → returns base64 JPEG in JSON |
+| `POST` | `/click` | Click at (x, y) |
+| `POST` | `/move` | Move pointer to (x, y) |
+| `POST` | `/type` | Type a text string |
+| `POST` | `/key` | Send a keypress (enter, tab, ctrl-c, etc.) |
+
+### Example requests
+
+```bash
+# Status
+curl http://127.0.0.1:7472/status
+
+# Screenshot (returns base64 image + metadata)
+curl -X POST http://127.0.0.1:7472/screenshot \
+  -H "Content-Type: application/json" \
+  -d '{"scale": 0.5, "quality": 70}'
+
+# Click
+curl -X POST http://127.0.0.1:7472/click \
+  -H "Content-Type: application/json" \
+  -d '{"x": 540, "y": 380}'
+
+# Type
+curl -X POST http://127.0.0.1:7472/type \
+  -H "Content-Type: application/json" \
+  -d '{"text": "hello world"}'
+
+# Key
+curl -X POST http://127.0.0.1:7472/key \
+  -H "Content-Type: application/json" \
+  -d '{"key": "return"}'
+```
+
+### Response shape
+
+All endpoints return JSON:
+```json
+{
+  "ok": true,
+  "image": "<base64-encoded-jpeg>",   // screenshot/click only
+  "width": 1710,                       // screenshot only
+  "height": 1107,                      // screenshot only
+  "scale": 0.5
+}
+```
+
+Errors return `{"ok": false, "error": "<message>"}` with an appropriate HTTP status code.
+
+### Prerequisites
+
+```bash
+pip install fastapi uvicorn
+```
+
+Or run `./setup.sh` which installs all dependencies.
+
+---
+
 ## Troubleshooting
 
 - **Connection refused**: verify VNC/Screen Sharing is enabled on the target and the port is correct
@@ -234,3 +325,5 @@ Prefer `--format jpeg --scale 0.5` for agent loops — all text and UI elements 
 - **Daemon won't start**: check `.env` has all four vars set; run `vnc status` to see error output
 - **Lock detection wrong**: use `vnc detect-lock --screenshot /tmp/snap.jpg` to capture and manually inspect — calibrate luminance/pixel thresholds in `vnc-session.py` if needed
 - **Unlock fails**: ensure `VNC_PASSWORD` is set in `.env`; verify arrow-button native coords match your screen resolution
+- **API server 403**: ensure `VNC_API_SECRET` env matches the `X-VNC-API-Secret` header sent by callers
+- **API server not found**: check port (default 7472); use `--bind 0.0.0.0` only when remote access is needed

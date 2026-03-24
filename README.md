@@ -165,10 +165,53 @@ With default 50% scale: capture coords are automatically doubled for native reso
 - Persistent API connections (vncdotool threaded API, asyncvnc) were tested and abandoned due to macOS ARD framebuffer issues (black screenshots, timeout hangs).
 - For lock-screen unlock, the most reliable sequence is: `vncdo key bsp` ×20 (clear field) → `vncdo type '<password>'` → `vncdo key enter`. The daemon wrapper adds overhead that causes the ARD lock→desktop transition to not register.
 
-## Scope (v1)
+## HTTP API Server (Phase 5 / v0.2.0)
+
+For multi-agent or remote orchestration, `vnc_api.py` exposes all commands via HTTP:
+
+```bash
+# Start server (default: 127.0.0.1:7472)
+python3 vnc_api.py
+
+# With optional shared-secret auth
+VNC_API_SECRET=mysecret python3 vnc_api.py --port 7472
+
+# Convenience shim
+python3 vnc-api.py   # same as above
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/status` | Health check + VNC probe |
+| `POST` | `/screenshot` | Capture → base64 JPEG in JSON |
+| `POST` | `/click` | Click at (x, y) |
+| `POST` | `/move` | Move pointer to (x, y) |
+| `POST` | `/type` | Type text string |
+| `POST` | `/key` | Send keypress |
+
+### Auth
+
+Set `VNC_API_SECRET` in the environment. When set, all POST requests must send `X-VNC-API-Secret: <secret>`.
+
+### Example
+
+```bash
+curl http://127.0.0.1:7472/status
+curl -X POST http://127.0.0.1:7472/screenshot -H "Content-Type: application/json" -d '{"scale":0.5}'
+curl -X POST http://127.0.0.1:7472/click -H "Content-Type: application/json" -d '{"x":540,"y":380}'
+```
+
+Install extra deps: `pip install fastapi uvicorn` (or run `./setup.sh`).
+Unit tests: `pytest tests/test_vnc_api.py` (13 tests, all passing).
+
+---
+
+## Scope
 
 - Single VNC host (not a fleet manager)
-- CLI-first, API later
+- CLI-first + HTTP API for remote orchestration
 - This is a bridge, not a platform
 
 ## For AI Agents
