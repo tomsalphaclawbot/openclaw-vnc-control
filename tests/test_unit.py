@@ -5,6 +5,7 @@ Sprint F: automated e2e smoke tests (unit slice).
 All tests here run offline against pure-Python logic.
 """
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -264,3 +265,118 @@ class TestSha1File:
         f.write_bytes(b"world")
         h2 = vnc.sha1_file(str(f))
         assert h1 != h2
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: Vision-Assisted Automation — _vision_find_element unit tests
+# ---------------------------------------------------------------------------
+
+class TestVisionFindElement:
+    """Unit tests for _vision_find_element — mock the API, test parsing logic."""
+
+    def test_missing_api_key_returns_error(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        img = tmp_path / "test.jpg"
+        img.write_bytes(b"fake-jpeg-data")
+        result = vnc._vision_find_element(str(img), "save button")
+        assert result["found"] is False
+        assert "ANTHROPIC_API_KEY" in result["error"]
+
+    def test_valid_json_response_parsed(self, monkeypatch, tmp_path):
+        """Mock the urlopen to return a valid JSON vision response."""
+        import io
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
+        img = tmp_path / "test.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)  # minimal fake JPEG header
+
+        vision_payload = {
+            "content": [{"text": '{"found": true, "x": 142.5, "y": 87.0, "confidence": "high", "reasoning": "Save button found top right", "bounding_box": {"x1": 120, "y1": 75, "x2": 165, "y2": 99}}'}]
+        }
+
+        class FakeResp:
+            def read(self):
+                return json.dumps(vision_payload).encode()
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        monkeypatch.setattr(vnc.urllib.request, "urlopen", lambda *a, **kw: FakeResp())
+
+        result = vnc._vision_find_element(str(img), "save button")
+        assert result["found"] is True
+        assert result["x"] == 142.5
+        assert result["y"] == 87.0
+        assert result["confidence"] == "high"
+        assert result["bounding_box"]["x1"] == 120
+
+    def test_element_not_found_response(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
+        img = tmp_path / "test.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        vision_payload = {
+            "content": [{"text": '{"found": false, "x": null, "y": null, "confidence": "high", "reasoning": "No save button visible", "bounding_box": null}'}]
+        }
+
+        class FakeResp:
+            def read(self): return json.dumps(vision_payload).encode()
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        monkeypatch.setattr(vnc.urllib.request, "urlopen", lambda *a, **kw: FakeResp())
+
+        result = vnc._vision_find_element(str(img), "save button")
+        assert result["found"] is False
+        assert result["x"] is None
+
+    def test_markdown_fenced_json_stripped(self, monkeypatch, tmp_path):
+        """Vision model sometimes wraps JSON in ```json fences — should still parse."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
+        img = tmp_path / "test.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        fenced = '```json\n{"found": true, "x": 50.0, "y": 60.0, "confidence": "medium", "reasoning": "OK", "bounding_box": null}\n```'
+        vision_payload = {"content": [{"text": fenced}]}
+
+        class FakeResp:
+            def read(self): return json.dumps(vision_payload).encode()
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        monkeypatch.setattr(vnc.urllib.request, "urlopen", lambda *a, **kw: FakeResp())
+
+        result = vnc._vision_find_element(str(img), "button")
+        assert result["found"] is True
+        assert result["x"] == 50.0
+
+    def test_malformed_json_returns_error(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
+        img = tmp_path / "test.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        vision_payload = {"content": [{"text": "This is not JSON at all, sorry"}]}
+
+        class FakeResp:
+            def read(self): return json.dumps(vision_payload).encode()
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        monkeypatch.setattr(vnc.urllib.request, "urlopen", lambda *a, **kw: FakeResp())
+
+        result = vnc._vision_find_element(str(img), "button")
+        assert result["found"] is False
+        assert "parse failed" in result["error"].lower() or "error" in result
+
+    def test_api_exception_returns_error(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
+        img = tmp_path / "test.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        def raise_error(*a, **kw):
+            raise Exception("network timeout")
+
+        monkeypatch.setattr(vnc.urllib.request, "urlopen", raise_error)
+
+        result = vnc._vision_find_element(str(img), "button")
+        assert result["found"] is False
+        assert "network timeout" in result["error"]

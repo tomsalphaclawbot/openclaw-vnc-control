@@ -26,6 +26,7 @@ Connection via args (--host, --port, --password, --username) or env
 """
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -34,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -1085,6 +1087,285 @@ def cmd_connect(args, config):
         result_json(False, error=f"Connection failed: {stderr.strip()}")
 
 
+# ─── Phase 7: Vision-Assisted Automation ─────────────────────────────────────
+
+def _vision_find_element(image_path, description, model=None):
+    """
+    Call Anthropic vision API to locate a UI element described in natural language.
+    Returns dict with: found (bool), x (float), y (float), confidence (str),
+    reasoning (str), bounding_box (dict with x1,y1,x2,y2 or None).
+
+    Coordinates are in SCREENSHOT space (pixels in the captured image).
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return {"found": False, "error": "ANTHROPIC_API_KEY not set in env"}
+
+    # Read + encode image
+    with open(image_path, "rb") as f:
+        img_bytes = f.read()
+    img_b64 = base64.b64encode(img_bytes).decode()
+
+    # Detect media type
+    ext = Path(image_path).suffix.lower()
+    media_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
+
+    used_model = model or "claude-opus-4-5"
+
+    prompt = (
+        "You are a precise UI element locator. Your task is to find a specific UI element "
+        "in this screenshot and return its center coordinates.\n\n"
+        f"ELEMENT TO FIND: {description}\n\n"
+        "Respond ONLY with a JSON object (no markdown, no explanation outside JSON) with these fields:\n"
+        "- found: boolean — true if element is visible, false if not\n"
+        "- x: float — center x pixel coordinate in the screenshot (null if not found)\n"
+        "- y: float — center y pixel coordinate in the screenshot (null if not found)\n"
+        "- confidence: string — 'high', 'medium', or 'low'\n"
+        "- reasoning: string — one sentence explaining what you found and where\n"
+        "- bounding_box: object with x1,y1,x2,y2 pixel coords, or null if not found\n\n"
+        "Be precise. Use actual pixel coordinates from the image."
+    )
+
+    payload = {
+        "model": used_model,
+        "max_tokens": 512,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": img_b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt,
+                    },
+                ],
+            }
+        ],
+    }
+
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=data,
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+    except Exception as e:
+        return {"found": False, "error": f"Vision API call failed: {e}"}
+
+    # Extract text content from response
+    try:
+        text = result["content"][0]["text"].strip()
+        # Strip markdown code fences if present
+        if text.startswith("```"):
+            text = "\n".join(text.split("\n")[1:])
+            if text.endswith("```"):
+                text = text[: text.rfind("```")].strip()
+        parsed = json.loads(text)
+        return parsed
+    except Exception as e:
+        raw_text = result.get("content", [{}])[0].get("text", "")
+        return {"found": False, "error": f"Vision response parse failed: {e}", "raw": raw_text}
+
+
+def cmd_find_element(args, config):
+    """
+    Phase 7: find_element — locate a UI element using vision model.
+    Captures a screenshot, asks the vision model to locate the described element,
+    and returns its coordinates in screenshot space.
+    """
+    profile, fmt, scale, quality = capture_settings(args)
+
+    # Capture screenshot
+    tmp_img = tmpfile("find-element", "jpg" if fmt in ("jpeg", "jpg") else "png")
+    raw_png = tmpfile(".raw-fe", "png")
+
+    ok, _, stderr, duration = run_vncdo(config, ["capture", raw_png])
+    if not ok or not os.path.exists(raw_png):
+        result_json(False, error=f"Screenshot for find_element failed: {stderr.strip()}")
+        return
+
+    if fmt in ("jpeg", "jpg") or scale:
+        tmp_img = convert_screenshot(raw_png, tmp_img, fmt=fmt, scale=scale, quality=quality)
+    else:
+        tmp_img = raw_png
+
+    img_info = get_image_info(tmp_img)
+
+    # Call vision model
+    vision_model = getattr(args, "model", None) or os.environ.get("VNC_VISION_MODEL", "claude-opus-4-5")
+    vision_result = _vision_find_element(tmp_img, args.description, model=vision_model)
+
+    if not vision_result.get("found"):
+        result_json(False, {
+            "action": "find_element",
+            "description": args.description,
+            "found": False,
+            "model": vision_model,
+            "reasoning": vision_result.get("reasoning", "Element not found"),
+            "error": vision_result.get("error"),
+            "screenshot": {"path": tmp_img, "w": img_info.get("width"), "h": img_info.get("height")},
+        })
+        return
+
+    x = vision_result.get("x")
+    y = vision_result.get("y")
+    confidence = vision_result.get("confidence", "unknown")
+    reasoning = vision_result.get("reasoning", "")
+    bbox = vision_result.get("bounding_box")
+
+    # Compute native coords for convenience
+    native_x, native_y = None, None
+    if x is not None and y is not None and scale and scale > 0:
+        native_x = int(x / scale)
+        native_y = int(y / scale)
+
+    result_json(True, {
+        "action": "find_element",
+        "description": args.description,
+        "found": True,
+        "x": x,
+        "y": y,
+        "native_x": native_x,
+        "native_y": native_y,
+        "confidence": confidence,
+        "reasoning": reasoning,
+        "bounding_box": bbox,
+        "model": vision_model,
+        "coordinate_space": "screenshot",
+        "screenshot_scale": scale,
+        "screenshot": {"path": tmp_img, "w": img_info.get("width"), "h": img_info.get("height")},
+        "tip": "Use x,y with 'click' command (default screenshot space). Or use native_x,native_y with --space native.",
+    })
+
+
+def cmd_wait_for(args, config):
+    """
+    Phase 7: wait_for — screenshot loop until element/text appears (or timeout).
+    Polls every --interval seconds, up to --timeout seconds.
+    Returns as soon as element is found.
+    """
+    profile, fmt, scale, quality = capture_settings(args)
+    timeout_s = getattr(args, "timeout", 30)
+    interval_s = getattr(args, "interval", 2.0)
+    vision_model = getattr(args, "model", None) or os.environ.get("VNC_VISION_MODEL", "claude-opus-4-5")
+
+    start = time.time()
+    attempt = 0
+
+    while True:
+        elapsed = time.time() - start
+        if elapsed > timeout_s:
+            result_json(False, {
+                "action": "wait_for",
+                "description": args.description,
+                "found": False,
+                "timed_out": True,
+                "elapsed_s": round(elapsed, 2),
+                "attempts": attempt,
+                "timeout_s": timeout_s,
+            })
+            return
+
+        attempt += 1
+        tmp_img = tmpfile(f"wait-for-{attempt}", "jpg" if fmt in ("jpeg", "jpg") else "png")
+        raw_png = tmpfile(f".raw-wf-{attempt}", "png")
+
+        ok, _, stderr, _ = run_vncdo(config, ["capture", raw_png])
+        if ok and os.path.exists(raw_png):
+            if fmt in ("jpeg", "jpg") or scale:
+                tmp_img = convert_screenshot(raw_png, tmp_img, fmt=fmt, scale=scale, quality=quality)
+            else:
+                tmp_img = raw_png
+
+            vision_result = _vision_find_element(tmp_img, args.description, model=vision_model)
+            if vision_result.get("found"):
+                x = vision_result.get("x")
+                y = vision_result.get("y")
+                native_x = int(x / scale) if (x is not None and scale and scale > 0) else None
+                native_y = int(y / scale) if (y is not None and scale and scale > 0) else None
+                result_json(True, {
+                    "action": "wait_for",
+                    "description": args.description,
+                    "found": True,
+                    "elapsed_s": round(time.time() - start, 2),
+                    "attempts": attempt,
+                    "x": x,
+                    "y": y,
+                    "native_x": native_x,
+                    "native_y": native_y,
+                    "confidence": vision_result.get("confidence"),
+                    "reasoning": vision_result.get("reasoning"),
+                    "model": vision_model,
+                    "screenshot": tmp_img,
+                })
+                return
+
+        # Not found yet — wait and retry
+        remaining = timeout_s - (time.time() - start)
+        if remaining <= 0:
+            continue
+        time.sleep(min(interval_s, remaining))
+
+
+def cmd_assert_visible(args, config):
+    """
+    Phase 7: assert_visible — verify a UI element or text is currently visible.
+    Single screenshot + vision check. Exits 0 if found, 1 if not found.
+    """
+    profile, fmt, scale, quality = capture_settings(args)
+    vision_model = getattr(args, "model", None) or os.environ.get("VNC_VISION_MODEL", "claude-opus-4-5")
+
+    tmp_img = tmpfile("assert-visible", "jpg" if fmt in ("jpeg", "jpg") else "png")
+    raw_png = tmpfile(".raw-av", "png")
+
+    ok, _, stderr, _ = run_vncdo(config, ["capture", raw_png])
+    if not ok or not os.path.exists(raw_png):
+        print(json.dumps({"ok": False, "action": "assert_visible", "description": args.description,
+                          "visible": False, "error": f"Screenshot failed: {stderr.strip()}"}))
+        sys.exit(1)
+
+    if fmt in ("jpeg", "jpg") or scale:
+        tmp_img = convert_screenshot(raw_png, tmp_img, fmt=fmt, scale=scale, quality=quality)
+    else:
+        tmp_img = raw_png
+
+    vision_result = _vision_find_element(tmp_img, args.description, model=vision_model)
+    found = bool(vision_result.get("found"))
+
+    payload = {
+        "ok": found,
+        "action": "assert_visible",
+        "description": args.description,
+        "visible": found,
+        "confidence": vision_result.get("confidence"),
+        "reasoning": vision_result.get("reasoning"),
+        "x": vision_result.get("x"),
+        "y": vision_result.get("y"),
+        "model": vision_model,
+        "screenshot": tmp_img,
+    }
+    if not found:
+        payload["error"] = vision_result.get("error") or "Element not visible in current screenshot"
+
+    print(json.dumps(payload))
+    sys.exit(0 if found else 1)
+
+
 def cmd_status(args, config):
     import socket
     host = config["host"]
@@ -1199,6 +1480,32 @@ def main():
     # status
     sub.add_parser("status", help="TCP reachability check")
 
+    # find_element - Phase 7 vision-assisted UI element location
+    p = sub.add_parser("find_element", help="[Phase 7] Locate a UI element using vision model")
+    p.add_argument("description", help="Natural language description of element to find (e.g. 'Save button', 'username input field')")
+    p.add_argument("--model", default=None, help="Vision model to use (default: claude-opus-4-5 or $VNC_VISION_MODEL)")
+    p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None)
+    p.add_argument("--scale", type=float, default=None)
+    p.add_argument("--quality", type=int, default=None)
+
+    # wait_for - Phase 7 vision-assisted element wait loop
+    p = sub.add_parser("wait_for", help="[Phase 7] Wait until an element appears (vision loop)")
+    p.add_argument("description", help="Natural language description of element to wait for")
+    p.add_argument("--timeout", type=float, default=30, help="Max wait time in seconds (default: 30)")
+    p.add_argument("--interval", type=float, default=2.0, help="Poll interval in seconds (default: 2.0)")
+    p.add_argument("--model", default=None, help="Vision model to use (default: claude-opus-4-5 or $VNC_VISION_MODEL)")
+    p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None)
+    p.add_argument("--scale", type=float, default=None)
+    p.add_argument("--quality", type=int, default=None)
+
+    # assert_visible - Phase 7 vision-based UI state assertion
+    p = sub.add_parser("assert_visible", help="[Phase 7] Assert an element/text is visible (exit 0=found, 1=not found)")
+    p.add_argument("description", help="Natural language description of element to verify")
+    p.add_argument("--model", default=None, help="Vision model to use (default: claude-opus-4-5 or $VNC_VISION_MODEL)")
+    p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None)
+    p.add_argument("--scale", type=float, default=None)
+    p.add_argument("--quality", type=int, default=None)
+
     # sessions - list/show named session registry
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
@@ -1223,6 +1530,9 @@ def main():
         "map": cmd_map,
         "connect": cmd_connect,
         "status": cmd_status,
+        "find_element": cmd_find_element,
+        "wait_for": cmd_wait_for,
+        "assert_visible": cmd_assert_visible,
     }[args.command](args, config)
 
 

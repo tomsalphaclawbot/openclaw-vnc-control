@@ -67,11 +67,15 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - [x] HTTP API session-scoped routes: `GET /sessions`, `GET /sessions/{name}`, `/sessions/{name}/status|screenshot|click|type|key`
 - [x] 15 unit tests — 15/15 passing (total suite: 67/67)
 
-## Phase 7 — Vision-Assisted Automation (future)
-- [ ] `find_element <description>` — screenshot + OCR/vision model → returns click coordinates
-- [ ] `wait_for <condition>` — screenshot loop until element/text appears or timeout
-- [ ] `assert_visible <text>` — verify UI state without hardcoded coords
-- [ ] Integration with OpenClaw image tool as the vision backend
+## Phase 7 — Vision-Assisted Automation ✅ DONE 2026-03-24
+- [x] `find_element <description>` — screenshot + Anthropic vision API → returns click coordinates (screenshot space + native_x/native_y)
+- [x] `wait_for <description>` — screenshot loop until element appears or timeout; configurable --timeout/--interval
+- [x] `assert_visible <description>` — verify UI state without hardcoded coords; exits 0=found, 1=not found
+- [x] `_vision_find_element()` — shared vision core: base64 screenshot → Claude vision → parsed JSON response
+- [x] Markdown fence stripping for model responses that wrap JSON in ```code``` blocks
+- [x] 6 new unit tests (37/37 total passing); full suite 65/65 with no regressions
+- [x] `VNC_VISION_MODEL` env var + `--model` per-command override (default: claude-opus-4-5)
+- [x] `base64` and `urllib.request` moved to module-level imports (cleaner + testable)
 
 ## Abandoned Approaches (documented for future reference)
 - **vncdotool threaded API**: `captureScreen` hangs on macOS ARD (framebuffer timeout)
