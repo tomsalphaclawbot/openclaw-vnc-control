@@ -1,0 +1,33 @@
+name: hooked-workflow-demo
+description: |
+  Demonstrates Phase 17 event hooks. Each step fires lifecycle
+  shell commands for observability — no VNC connection needed.
+
+hooks:
+  step_start: "echo 'HOOK: Starting step' $STEP_ID $STEP_COMMAND"
+  step_end: "echo 'HOOK: Finished step' $STEP_ID ok=$STEP_OK took=${STEP_DURATION_MS}ms"
+  step_fail: "echo 'HOOK: FAILED step' $STEP_ID after $STEP_ATTEMPTS attempts"
+  workflow_complete: "echo 'HOOK: Workflow' $WORKFLOW_NAME complete ok=$WORKFLOW_OK duration=${WORKFLOW_DURATION_MS}ms passed=$STEPS_PASSED failed=$STEPS_FAILED"
+
+variables:
+  greeting: "hello from hooks"
+
+steps:
+  - id: greet
+    command: echo
+    args: ["{{greeting}}"]
+
+  - id: pause
+    command: sleep
+    args: ["0.1"]
+
+  - id: custom-hook-step
+    command: echo
+    args: ["this step has its own hooks"]
+    hooks:
+      step_start: "echo 'CUSTOM: About to run custom-hook-step'"
+      step_end: "echo 'CUSTOM: custom-hook-step done'"
+
+  - id: final
+    command: echo
+    args: ["workflow complete"]

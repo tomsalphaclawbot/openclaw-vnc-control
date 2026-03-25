@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-vnc-workflow.py — Phase 16: Conditional Step Execution for openclaw-vnc-control
+vnc-workflow.py — Phase 17: Workflow Event Hooks for openclaw-vnc-control
 
 Execute multi-step VNC automation workflows defined in YAML or JSON.
 Each step calls a vnc-control.py command; results are tracked and summarized.
+
+Phase 17 adds: lifecycle event hooks — shell commands that fire before/after
+each step and at workflow completion, enabling external observability and
+integration without embedding logic inside the workflow itself.
 
 Phase 16 adds: `when` conditional expressions — steps can be skipped based on
 previous step output or variable values, enabling branching automation logic.
@@ -64,6 +68,40 @@ Variable interpolation:
 Built-in commands (no subprocess):
     sleep SECONDS  — pause execution
     echo MESSAGE   — log a message in the step output
+
+Event hooks (Phase 17):
+    Hooks fire shell commands at lifecycle points. Configure at workflow level
+    under a `hooks` key, or per-step under a step's `hooks` key (step overrides
+    workflow-level hooks for that step only).
+
+    Workflow-level hooks:
+      hooks:
+        step_start: "echo 'Starting {{STEP_ID}}'"
+        step_end: "echo 'Step {{STEP_ID}} ok={{STEP_OK}} took {{STEP_DURATION_MS}}ms'"
+        step_fail: "screenshot --out /tmp/fail-{{STEP_ID}}.jpg"
+        workflow_complete: "curl -s -X POST https://notify.example.com/done -d '{{WORKFLOW_SUMMARY_JSON}}'"
+
+    Per-step hook override:
+      steps:
+        - id: risky-step
+          command: click
+          args: [100, 200]
+          hooks:
+            step_fail: "echo 'risky-step failed, screenshot saved'"
+            step_start: ""   # empty string disables the global hook for this step
+
+    Environment variables injected into all hook commands:
+      STEP_ID           — step id string
+      STEP_OK           — "true" or "false"
+      STEP_DURATION_MS  — integer milliseconds
+      STEP_COMMAND      — vnc-control command name
+      STEP_ATTEMPTS     — number of attempts made
+      WORKFLOW_NAME     — workflow name
+      WORKFLOW_SUMMARY_JSON — (workflow_complete only) full result JSON string
+
+    Hook commands support {{VAR}} interpolation (same as step args).
+    Hook failures do NOT abort the workflow by default.
+    Set `hook_on_error: stop` to change this behavior.
 """
 
 from __future__ import annotations
@@ -334,6 +372,64 @@ def interpolate(value: Any, variables: Dict[str, Any], step_outputs: Dict[str, A
     return value
 
 
+# ── Hook Execution ────────────────────────────────────────────────────────
+
+def fire_hook(
+    hook_cmd: str,
+    hook_env: Dict[str, str],
+    variables: Dict[str, Any],
+    step_outputs: Dict[str, Any],
+    hook_on_error: str = "ignore",
+) -> Dict[str, Any]:
+    """
+    Fire a lifecycle hook shell command.
+    Returns dict with ok, returncode, stdout, stderr.
+    Non-zero exit is suppressed unless hook_on_error == 'stop'.
+    """
+    if not hook_cmd or not hook_cmd.strip():
+        return {"ok": True, "skipped": True}
+
+    # Interpolate {{VAR}} in hook command string
+    try:
+        resolved_cmd = interpolate(hook_cmd, {**variables, **hook_env}, step_outputs)
+    except WorkflowError:
+        resolved_cmd = hook_cmd
+
+    env = os.environ.copy()
+    env.update(hook_env)
+
+    try:
+        proc = subprocess.run(
+            resolved_cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        result = {
+            "ok": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout.strip(),
+            "stderr": proc.stderr.strip(),
+        }
+    except subprocess.TimeoutExpired:
+        result = {"ok": False, "error": "hook timed out after 30s"}
+    except Exception as e:
+        result = {"ok": False, "error": str(e)}
+
+    return result
+
+
+def _resolve_step_hooks(step: Dict[str, Any], workflow_hooks: Dict[str, str]) -> Dict[str, str]:
+    """Merge workflow-level hooks with per-step hook overrides."""
+    merged = dict(workflow_hooks)
+    step_hooks = step.get("hooks", {})
+    if isinstance(step_hooks, dict):
+        merged.update(step_hooks)
+    return merged
+
+
 # ── Step Execution ────────────────────────────────────────────────────────
 def run_step_builtin(step: Dict[str, Any], args: List[str]) -> Dict[str, Any]:
     """Execute a built-in command (sleep, echo) — no subprocess."""
@@ -392,6 +488,9 @@ def execute_step(
     variables: Dict[str, Any],
     step_outputs: Dict[str, Any],
     extra_env: Optional[Dict[str, str]] = None,
+    workflow_hooks: Optional[Dict[str, str]] = None,
+    hook_on_error: str = "ignore",
+    workflow_name: str = "unnamed",
 ) -> Tuple[bool, Dict[str, Any]]:
     """
     Execute one workflow step with retry logic.
@@ -406,6 +505,9 @@ def execute_step(
     step_timeout = int(step.get("timeout", 60))
     save_output = step.get("save_output")
     when_expr = step.get("when")
+
+    # Resolve hooks for this step (workflow-level + step-level overrides)
+    effective_hooks = _resolve_step_hooks(step, workflow_hooks or {})
 
     # Evaluate `when` conditional — skip step if expression is False
     if when_expr is not None:
@@ -455,7 +557,22 @@ def execute_step(
     builtin = command in ("sleep", "echo")
     attempts = 0
     last_result = None
+    hook_records: List[Dict[str, Any]] = []
     t_start = time.monotonic()
+
+    # ── Fire step_start hook ──
+    step_start_hook = effective_hooks.get("step_start", "")
+    if step_start_hook:
+        hook_env = {
+            "STEP_ID": step_id,
+            "STEP_COMMAND": command,
+            "STEP_OK": "unknown",
+            "STEP_DURATION_MS": "0",
+            "STEP_ATTEMPTS": "0",
+            "WORKFLOW_NAME": workflow_name,
+        }
+        hr = fire_hook(step_start_hook, hook_env, variables, step_outputs, hook_on_error)
+        hook_records.append({"event": "step_start", **hr})
 
     for attempt in range(retry_max + 1):
         attempts = attempt + 1
@@ -474,6 +591,35 @@ def execute_step(
 
     duration_ms = round((time.monotonic() - t_start) * 1000)
     step_ok = bool(last_result.get("ok"))
+
+    # ── Fire step_end hook ──
+    step_end_hook = effective_hooks.get("step_end", "")
+    if step_end_hook:
+        hook_env = {
+            "STEP_ID": step_id,
+            "STEP_COMMAND": command,
+            "STEP_OK": str(step_ok).lower(),
+            "STEP_DURATION_MS": str(duration_ms),
+            "STEP_ATTEMPTS": str(attempts),
+            "WORKFLOW_NAME": workflow_name,
+        }
+        hr = fire_hook(step_end_hook, hook_env, variables, step_outputs, hook_on_error)
+        hook_records.append({"event": "step_end", **hr})
+
+    # ── Fire step_fail hook (only on failure) ──
+    if not step_ok:
+        step_fail_hook = effective_hooks.get("step_fail", "")
+        if step_fail_hook:
+            hook_env = {
+                "STEP_ID": step_id,
+                "STEP_COMMAND": command,
+                "STEP_OK": "false",
+                "STEP_DURATION_MS": str(duration_ms),
+                "STEP_ATTEMPTS": str(attempts),
+                "WORKFLOW_NAME": workflow_name,
+            }
+            hr = fire_hook(step_fail_hook, hook_env, variables, step_outputs, hook_on_error)
+            hook_records.append({"event": "step_fail", **hr})
 
     # Build the step output record: always includes 'ok', plus any data fields
     data = last_result.get("data", {})
@@ -504,6 +650,8 @@ def execute_step(
     }
     if save_output:
         record["saved_as"] = save_output
+    if hook_records:
+        record["hooks"] = hook_records
 
     return step_ok, record
 
@@ -521,6 +669,8 @@ def run_workflow(
     wf_name = wf.get("name", "unnamed")
     wf_desc = wf.get("description", "")
     steps = wf.get("steps", [])
+    workflow_hooks = wf.get("hooks", {})
+    hook_on_error = wf.get("hook_on_error", "ignore")
 
     # Merge variables: workflow defaults < extra_vars
     variables: Dict[str, Any] = {}
@@ -563,7 +713,12 @@ def run_workflow(
     t_start = time.monotonic()
 
     for step in steps:
-        step_ok, record = execute_step(step, variables, step_outputs, extra_env)
+        step_ok, record = execute_step(
+            step, variables, step_outputs, extra_env,
+            workflow_hooks=workflow_hooks,
+            hook_on_error=hook_on_error,
+            workflow_name=wf_name,
+        )
         step_records.append(record)
 
         if record.get("skipped") and record.get("when") is not None:
@@ -592,7 +747,7 @@ def run_workflow(
     total_duration_ms = round((time.monotonic() - t_start) * 1000)
     final_ok = workflow_ok and failed == 0
 
-    return {
+    result = {
         "ok": final_ok,
         "workflow": wf_name,
         "description": wf_desc,
@@ -604,6 +759,31 @@ def run_workflow(
         "duration_ms": total_duration_ms,
         "steps": step_records,
     }
+
+    # ── Fire workflow_complete hook ──
+    wf_complete_hook = workflow_hooks.get("workflow_complete", "")
+    if wf_complete_hook:
+        try:
+            summary_json = json.dumps(result)
+        except (TypeError, ValueError):
+            summary_json = "{}"
+        hook_env = {
+            "WORKFLOW_NAME": wf_name,
+            "WORKFLOW_OK": str(final_ok).lower(),
+            "WORKFLOW_DURATION_MS": str(total_duration_ms),
+            "STEPS_PASSED": str(passed),
+            "STEPS_FAILED": str(failed),
+            "STEP_ID": "",
+            "STEP_COMMAND": "",
+            "STEP_OK": str(final_ok).lower(),
+            "STEP_DURATION_MS": str(total_duration_ms),
+            "STEP_ATTEMPTS": "0",
+            "WORKFLOW_SUMMARY_JSON": summary_json,
+        }
+        hr = fire_hook(wf_complete_hook, hook_env, variables, step_outputs, hook_on_error)
+        result["workflow_complete_hook"] = hr
+
+    return result
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────

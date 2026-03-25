@@ -88,6 +88,51 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - [x] Full suite: 81 passed, 5 skipped (up from 68+5)
 - [x] Tagged v0.5.0
 
+## Phase 9 — Image Diffing / Change Detection ✅ DONE 2026-03-24
+- [x] `diff <before> <after>` — compare two screenshots pixel-by-pixel
+- [x] `--threshold N` — configurable change sensitivity (default: 10/255)
+- [x] Returns: `changed`, `change_pct`, `changed_pixels`, `total_pixels`, `bounding_box`, `mean_diff_per_channel`
+- [x] Bounding box covers minimal rectangle enclosing all changed pixels (x, y, x2, y2, width, height)
+- [x] Annotated overlay image: after-image with red highlights on changed regions + orange bbox rectangle
+- [x] Auto-resize if before/after differ in dimensions (handles screenshot scale changes)
+- [x] 6 unit tests (56/56 total passing + 5 skipped integration)
+- [x] Tagged v0.6.0
+
+## Phase 10 — Region-of-Interest Crop ✅ DONE 2026-03-25
+- [x] `crop <source>` — extract sub-region from screenshot or image file
+- [x] `--region X Y W H` in screenshot/native/normalized coordinate spaces (auto-detected from args)
+- [x] `--space screenshot|native|normalized` — explicit space override
+- [x] Auto-clamp region to image bounds (never out-of-range error)
+- [x] `coverage_pct` in output — fraction of original image area covered
+- [x] `--out` for saving cropped image; `--format`/`--quality` options
+- [x] 7 unit tests (63/63 total passing with no regressions)
+- [x] Tagged v0.7.0
+- **Rationale:** Enables focused analysis on sub-regions without passing the full screenshot to vision API. Reduces cost and improves accuracy for dense UIs.
+
+## Phase 11 — Screenshot Annotation ✅ DONE 2026-03-25
+- [x] `annotate <source> --shape SPEC [--shape SPEC ...]` — draw labeled shapes on screenshots
+- [x] Shape types: `rect` (outlined + semi-transparent fill), `circle`, `arrow` (with arrowhead), `text` (with background box)
+- [x] 10 named colors (red/green/blue/yellow/orange/purple/cyan/pink/white/black) + hex (#RRGGBB)
+- [x] Optional labels drawn adjacent to each shape
+- [x] `--line-width` control (default 2px)
+- [x] `--format` (jpeg/png), `--quality`, `--out` options
+- [x] Graceful handling of malformed shape specs (error entry in output, no crash)
+- [x] 11 unit tests (110/110 total passing + 0 regressions)
+- [x] Tagged v0.8.0
+- **Rationale:** Close the agent feedback loop — after vision API locates an element, annotate the screenshot with bounding boxes/arrows for visual confirmation before clicking.
+
+## Phase 12 — Macro Record & Playback ✅ DONE 2026-03-25
+- [x] `macro record <file>` — read JSON action list from stdin → save as named macro file
+- [x] `macro play <file>` — replay recorded actions with configurable `--delay-scale` (0=no delays, 1=real-time, 2=double)
+- [x] `macro list <file>` — inspect macro action count + summary without executing
+- [x] 7 action types supported: `click`, `move`, `type`, `key`, `scroll`, `drag`, `wait`
+- [x] `--continue-on-error` flag: skip failed steps instead of aborting (default: abort on first failure)
+- [x] `_resolve_coords` extracted helper shared across commands (screenshot/native/normalized → native)
+- [x] Returns structured JSON: `total`, `executed`, `passed`, `failed`, `aborted_at_step`
+- [x] 20 unit tests: resolve_coords (6), list (3), record (4), play (7) — total suite 130/130 passing
+- [x] Tagged v0.9.0
+- **Rationale:** Record-once-replay-many for repetitive GUI flows. Complements workflow runner (Phase 15) for raw action-level sequences vs. higher-level step abstractions.
+
 ## Phase 13 — Clipboard Integration ✅ DONE 2026-03-25
 - [x] `clipboard get` — read current clipboard text via OS native tools (pbpaste on macOS, xclip on Linux)
 - [x] `clipboard set --text TEXT` — write text to clipboard (pbcopy/xclip)
@@ -100,6 +145,19 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - [x] 10 unit tests (73/73 total passing + 0 regressions)
 - [x] Tagged v0.9.1
 - **Rationale:** Completes the read-back loop. Vision API extracts text from screenshots (slow + ~$0.01/call). Clipboard reads it for free. Workflow: `find_element` → `click` → `clipboard copy` → inspect text without another vision call.
+
+## Phase 14 — OCR Text Extraction ✅ DONE 2026-03-25
+- [x] `read_text` command — extract text from screen or image file using Tesseract OCR
+- [x] `--source screen|file` — screenshot live screen or read from image path
+- [x] `--region X Y W H` — optional crop before OCR (avoids full-screen noise)
+- [x] `--lang LANG` — Tesseract language code (default: eng)
+- [x] `--psm N` — Tesseract page segmentation mode (default: 3 = fully automatic)
+- [x] `--raw` mode — per-word confidence scores + bounding boxes (via pytesseract image_to_data)
+- [x] `--out FILE` — save intermediate cropped/processed image for debugging
+- [x] Uses pytesseract (requires Tesseract 5.x binary; 5.5.2 installed locally)
+- [x] 8 unit tests (81/81 total passing; OCR binary tests skip gracefully in CI)
+- [x] Tagged v1.0.0 (first major version milestone)
+- **Rationale:** Replaces vision-API-per-text-element with local OCR for high-frequency text reads. Orders of magnitude cheaper than Claude vision for simple label/number extraction.
 
 ## Phase 15 — Workflow Runner ✅ DONE 2026-03-25
 - [x] `vnc-workflow.py` — YAML/JSON workflow engine; chains vnc-control commands into reusable automation scripts
@@ -118,29 +176,41 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - [x] Tagged v1.1.0
 - **Rationale:** Enables agents to write automation workflows once and replay deterministically. Eliminates per-step round-trips. Foundation for multi-step GUI automation (login flows, dialog handling, form filling).
 
+## Phase 16 — Conditional Workflow Execution ✅ DONE 2026-03-25
+- [x] `when` field on workflow steps — skip steps based on runtime conditions
+- [x] Literal shortcuts: `when: "true"` (always run) / `when: "false"` (always skip)
+- [x] String equality/inequality: `"{{step.field}} == value"` / `"{{step.field}} != value"`
+- [x] Numeric comparisons: `>`, `>=`, `<`, `<=` — both LHS and RHS interpolated before comparison
+- [x] Boolean checks: `"{{step.ok}} == true"` / `"{{step.ok}} != false"`
+- [x] Conditional-skipped steps tracked separately (`steps_conditional_skipped` counter)
+- [x] Skipped step outputs registered for downstream reference (downstream steps can still reference them)
+- [x] 31 new unit tests (186/186 total passing, 5 skipped)
+- [x] Sample workflow: `workflows/conditional-check.yaml`
+- [x] Tagged v1.2.0
+- **Rationale:** Enables branching automation logic. Example: only click "Save" if a previous `find_element` step succeeded; only retry unlock if `detect_lock_screen` returned true.
+
+## Phase 17 — Workflow Event Hooks ✅ DONE 2026-03-25
+- [x] `step_start` hook — shell command fired before each step runs
+- [x] `step_end` hook — fires after each step (pass or fail); receives step result as env vars
+- [x] `workflow_complete` hook — fires at workflow end; `WORKFLOW_SUMMARY_JSON` env var contains full result JSON
+- [x] `step_fail` hook — fires only when a step fails (after `step_end`)
+- [x] Hook commands run via subprocess with 30s timeout; non-zero exit does NOT abort workflow by default
+- [x] Configurable `hook_on_error: stop|ignore` (workflow-level setting)
+- [x] Environment variables injected: `STEP_ID`, `STEP_OK`, `STEP_DURATION_MS`, `STEP_COMMAND`, `STEP_ATTEMPTS`, `WORKFLOW_NAME`
+- [x] Workflow-level `hooks` block with `step_start`, `step_end`, `workflow_complete`, `step_fail` keys
+- [x] Per-step `hooks` block overrides global hooks for that step only (empty string disables)
+- [x] `{{VAR}}` interpolation supported in hook command strings
+- [x] Hook results attached to step records under `hooks` key; workflow_complete under `workflow_complete_hook`
+- [x] Hooks do NOT fire for conditionally-skipped steps (Phase 16 `when: false`)
+- [x] `fire_hook()` function + `_resolve_step_hooks()` merge helper
+- [x] 24 unit tests (176/176 total suite passing, 5 skipped)
+- [x] Sample workflow: `workflows/hooked-workflow.yaml`
+- [x] CI updated to include `tests/test_hooks.py`
+- [x] Tagged v1.3.0
+- **Rationale:** Enables observability without hardcoding it into every step. Example patterns: screenshot on every failure, push step timings to a metrics endpoint, send Telegram notification when workflow completes, integrate with OpenClaw cron/notify pipeline.
+
 ## Abandoned Approaches (documented for future reference)
 - **vncdotool threaded API**: `captureScreen` hangs on macOS ARD (framebuffer timeout)
 - **asyncvnc**: Screenshots all-black (encoding limitation)
 - **vncdo stdin mode**: Can't interleave commands (batch-then-exit only)
 - **Persistent connection pooling**: All tested persistent approaches fail on macOS ARD
-
-## Phase 11 — Screenshot Annotation ✅ DONE 2026-03-25
-- [x] `annotate <source> --shape SPEC [--shape SPEC ...]` — draw labeled shapes on screenshots
-- [x] Shape types: `rect` (outlined + semi-transparent fill), `circle`, `arrow` (with arrowhead), `text` (with background box)
-- [x] 10 named colors (red/green/blue/yellow/orange/purple/cyan/pink/white/black) + hex (#RRGGBB)
-- [x] Optional labels drawn adjacent to each shape
-- [x] `--line-width` control (default 2px)
-- [x] `--format` (jpeg/png), `--quality`, `--out` options
-- [x] Graceful handling of malformed shape specs (error entry in output, no crash)
-- [x] 11 unit tests (110/110 total passing + 0 regressions)
-- [x] Tagged v0.8.0
-
-## Phase 9 — Image Diffing / Change Detection ✅ DONE 2026-03-24
-- [x] `diff <before> <after>` — compare two screenshots pixel-by-pixel
-- [x] `--threshold N` — configurable change sensitivity (default: 10/255)
-- [x] Returns: `changed`, `change_pct`, `changed_pixels`, `total_pixels`, `bounding_box`, `mean_diff_per_channel`
-- [x] Bounding box covers minimal rectangle enclosing all changed pixels (x, y, x2, y2, width, height)
-- [x] Annotated overlay image: after-image with red highlights on changed regions + orange bbox rectangle
-- [x] Auto-resize if before/after differ in dimensions (handles screenshot scale changes)
-- [x] 6 unit tests (56/56 total passing + 5 skipped integration)
-- [x] Tagged v0.6.0
