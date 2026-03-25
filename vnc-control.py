@@ -1726,6 +1726,202 @@ def cmd_crop(args, _config):
     })
 
 
+def cmd_annotate(args, _config):
+    """Phase 11: Annotate a screenshot with labeled shapes.
+
+    Draws rectangles, circles, arrows, and/or text labels on a screenshot
+    to highlight regions of interest. Useful for AI inspection, debugging,
+    documentation, and visual diff workflows.
+
+    Shape specs (--shape flags, repeatable):
+      rect:X1,Y1,X2,Y2[,COLOR[,LABEL]]   — filled/outlined rectangle
+      circle:CX,CY,R[,COLOR[,LABEL]]     — circle at center (CX,CY) radius R
+      arrow:X1,Y1,X2,Y2[,COLOR[,LABEL]]  — arrow from (X1,Y1) → (X2,Y2)
+      text:X,Y,TEXT[,COLOR]              — text annotation at (X,Y)
+
+    All coordinates in screenshot space by default (same image pixels).
+    COLOR defaults to red (#FF0000) if omitted.
+    LABEL is optional descriptive text drawn beside the shape.
+
+    Returns JSON with annotated image path and a list of drawn shapes.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        result_json(False, error="Phase 11 requires Pillow (pip install Pillow)")
+        return
+
+    src_path = args.source
+    if not os.path.exists(src_path):
+        result_json(False, error=f"Source image not found: {src_path}")
+        return
+
+    try:
+        img = Image.open(src_path).convert("RGBA")
+    except Exception as e:
+        result_json(False, error=f"Cannot open source image: {e}")
+        return
+
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    # Font selection — use default PIL bitmap font (always available, no external dep)
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14)
+        font_large = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
+    except Exception:
+        font = ImageFont.load_default()
+        font_large = font
+
+    def parse_color(color_str):
+        """Parse color string to RGBA tuple."""
+        if not color_str:
+            return (255, 50, 50, 220)  # default: semi-transparent red
+        # Named colors first (before trying hex parse)
+        named = {
+            "red": (255, 50, 50, 220),
+            "green": (50, 205, 50, 220),
+            "blue": (50, 100, 255, 220),
+            "yellow": (255, 220, 0, 220),
+            "orange": (255, 140, 0, 220),
+            "purple": (160, 50, 200, 220),
+            "white": (255, 255, 255, 220),
+            "black": (0, 0, 0, 220),
+            "cyan": (0, 210, 210, 220),
+            "pink": (255, 100, 180, 220),
+        }
+        if color_str.lower() in named:
+            return named[color_str.lower()]
+        # Try hex
+        s = color_str.strip().lstrip("#")
+        if len(s) == 6:
+            try:
+                r = int(s[0:2], 16)
+                g = int(s[2:4], 16)
+                b = int(s[4:6], 16)
+                return (r, g, b, 220)
+            except ValueError:
+                pass
+        return (255, 50, 50, 220)  # fallback to red
+
+    shapes_drawn = []
+    line_width = max(2, getattr(args, "line_width", 2))
+
+    shape_specs = getattr(args, "shape", []) or []
+    for spec in shape_specs:
+        # parse: kind:param1,param2,...
+        if ":" not in spec:
+            continue
+        kind, rest = spec.split(":", 1)
+        parts = rest.split(",")
+        kind = kind.strip().lower()
+
+        try:
+            if kind == "rect":
+                # rect:X1,Y1,X2,Y2[,COLOR[,LABEL]]
+                x1, y1, x2, y2 = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
+                color = parse_color(parts[4] if len(parts) > 4 else None)
+                label = parts[5] if len(parts) > 5 else None
+                # Draw rectangle outline
+                draw.rectangle([x1, y1, x2, y2], outline=color, width=line_width)
+                # Semi-transparent fill
+                fill_overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+                fill_draw = ImageDraw.Draw(fill_overlay)
+                fill_color = (color[0], color[1], color[2], 40)
+                fill_draw.rectangle([x1, y1, x2, y2], fill=fill_color)
+                overlay = Image.alpha_composite(overlay, fill_overlay)
+                draw = ImageDraw.Draw(overlay)
+                # Label
+                if label:
+                    draw.text((x1 + 3, y1 - 18), label, fill=color, font=font)
+                shapes_drawn.append({"type": "rect", "coords": [x1, y1, x2, y2], "color": f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}", "label": label})
+
+            elif kind == "circle":
+                # circle:CX,CY,R[,COLOR[,LABEL]]
+                cx, cy, r = int(parts[0]), int(parts[1]), int(parts[2])
+                color = parse_color(parts[3] if len(parts) > 3 else None)
+                label = parts[4] if len(parts) > 4 else None
+                bbox = [cx - r, cy - r, cx + r, cy + r]
+                draw.ellipse(bbox, outline=color, width=line_width)
+                if label:
+                    draw.text((cx + r + 4, cy - 8), label, fill=color, font=font)
+                shapes_drawn.append({"type": "circle", "center": [cx, cy], "radius": r, "color": f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}", "label": label})
+
+            elif kind == "arrow":
+                # arrow:X1,Y1,X2,Y2[,COLOR[,LABEL]]
+                x1, y1, x2, y2 = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
+                color = parse_color(parts[4] if len(parts) > 4 else None)
+                label = parts[5] if len(parts) > 5 else None
+                # Shaft
+                draw.line([(x1, y1), (x2, y2)], fill=color, width=line_width)
+                # Arrowhead: compute perpendicular offset
+                import math
+                dx, dy = x2 - x1, y2 - y1
+                length = math.hypot(dx, dy)
+                if length > 0:
+                    head_len = max(10, min(20, int(length * 0.25)))
+                    ux, uy = dx / length, dy / length  # unit vector
+                    # Two arrowhead corners
+                    perp_x, perp_y = -uy, ux
+                    hw = head_len * 0.4  # half-width of arrowhead base
+                    p1 = (x2 - ux * head_len + perp_x * hw, y2 - uy * head_len + perp_y * hw)
+                    p2 = (x2 - ux * head_len - perp_x * hw, y2 - uy * head_len - perp_y * hw)
+                    draw.polygon([(x2, y2), p1, p2], fill=color)
+                if label:
+                    mx, my = (x1 + x2) // 2, (y1 + y2) // 2
+                    draw.text((mx + 4, my - 8), label, fill=color, font=font)
+                shapes_drawn.append({"type": "arrow", "from": [x1, y1], "to": [x2, y2], "color": f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}", "label": label})
+
+            elif kind == "text":
+                # text:X,Y,TEXT[,COLOR]
+                x, y = int(parts[0]), int(parts[1])
+                text = parts[2].replace("_", " ") if len(parts) > 2 else "?"
+                color = parse_color(parts[3] if len(parts) > 3 else None)
+                # Background box for readability
+                bbox = draw.textbbox((x, y), text, font=font_large)
+                pad = 3
+                draw.rectangle([bbox[0]-pad, bbox[1]-pad, bbox[2]+pad, bbox[3]+pad],
+                               fill=(0, 0, 0, 160))
+                draw.text((x, y), text, fill=color, font=font_large)
+                shapes_drawn.append({"type": "text", "pos": [x, y], "text": text, "color": f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"})
+
+        except (ValueError, IndexError) as e:
+            # Skip malformed shape specs
+            shapes_drawn.append({"type": kind, "error": str(e), "spec": spec})
+
+    # Composite overlay onto image
+    result_img = Image.alpha_composite(img, overlay)
+
+    # Output path
+    out_path = getattr(args, "out", None)
+    if not out_path:
+        out_path = tmpfile("annotate", "jpg")
+
+    out_fmt = getattr(args, "format", None) or "jpeg"
+    quality = getattr(args, "quality", None) or DEFAULT_QUALITY
+
+    if out_fmt in ("jpeg", "jpg"):
+        result_img_rgb = result_img.convert("RGB")
+        if not (out_path.endswith(".jpg") or out_path.endswith(".jpeg")):
+            out_path = (out_path.rsplit(".", 1)[0] + ".jpg") if "." in out_path else (out_path + ".jpg")
+        result_img_rgb.save(out_path, "JPEG", quality=quality)
+    else:
+        result_img.save(out_path, "PNG")
+
+    result_img.close()
+    img.close()
+
+    out_info = get_image_info(out_path)
+    result_json(True, {
+        "action": "annotate",
+        "source": src_path,
+        "shapes_drawn": len(shapes_drawn),
+        "shapes": shapes_drawn,
+        "output": out_info,
+        "tip": "Use rect/circle shapes to highlight UI elements, arrow to indicate click targets, text to add labels.",
+    })
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1898,6 +2094,24 @@ def main():
     p.add_argument("--quality", type=int, default=None,
                    help="JPEG quality (default: 80)")
 
+    # annotate - Phase 11: draw labeled shapes on a screenshot
+    p = sub.add_parser("annotate", help="[Phase 11] Annotate a screenshot with rectangles, circles, arrows, text")
+    p.add_argument("source", help="Path to source screenshot image")
+    p.add_argument("--shape", action="append", metavar="SPEC",
+                   help="Shape spec (repeatable). Formats: "
+                        "rect:X1,Y1,X2,Y2[,COLOR[,LABEL]] | "
+                        "circle:CX,CY,R[,COLOR[,LABEL]] | "
+                        "arrow:X1,Y1,X2,Y2[,COLOR[,LABEL]] | "
+                        "text:X,Y,TEXT[,COLOR]. "
+                        "COLOR = hex (#FF0000) or name (red/green/blue/yellow/orange/purple/cyan/pink/white/black)")
+    p.add_argument("--line-width", type=int, default=2,
+                   help="Line/border width in pixels (default: 2)")
+    p.add_argument("--out", default=None, help="Output path for annotated image (default: auto-temp)")
+    p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None,
+                   help="Output format (default: jpeg)")
+    p.add_argument("--quality", type=int, default=None,
+                   help="JPEG quality (default: 80)")
+
     # sessions - list/show named session registry
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
@@ -1929,6 +2143,7 @@ def main():
         "drag": cmd_drag,
         "diff": cmd_diff,
         "crop": cmd_crop,
+        "annotate": cmd_annotate,
     }[args.command](args, config)
 
 

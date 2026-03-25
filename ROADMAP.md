@@ -94,6 +94,17 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - **vncdo stdin mode**: Can't interleave commands (batch-then-exit only)
 - **Persistent connection pooling**: All tested persistent approaches fail on macOS ARD
 
+## Phase 11 — Screenshot Annotation ✅ DONE 2026-03-25
+- [x] `annotate <source> --shape SPEC [--shape SPEC ...]` — draw labeled shapes on screenshots
+- [x] Shape types: `rect` (outlined + semi-transparent fill), `circle`, `arrow` (with arrowhead), `text` (with background box)
+- [x] 10 named colors (red/green/blue/yellow/orange/purple/cyan/pink/white/black) + hex (#RRGGBB)
+- [x] Optional labels drawn adjacent to each shape
+- [x] `--line-width` control (default 2px)
+- [x] `--format` (jpeg/png), `--quality`, `--out` options
+- [x] Graceful handling of malformed shape specs (error entry in output, no crash)
+- [x] 11 unit tests (110/110 total passing + 0 regressions)
+- [x] Tagged v0.8.0
+
 ## Phase 9 — Image Diffing / Change Detection ✅ DONE 2026-03-24
 - [x] `diff <before> <after>` — compare two screenshots pixel-by-pixel
 - [x] `--threshold N` — configurable change sensitivity (default: 10/255)
