@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-vnc-workflow.py — Phase 15: Workflow Runner for openclaw-vnc-control
+vnc-workflow.py — Phase 16: Conditional Step Execution for openclaw-vnc-control
 
 Execute multi-step VNC automation workflows defined in YAML or JSON.
 Each step calls a vnc-control.py command; results are tracked and summarized.
+
+Phase 16 adds: `when` conditional expressions — steps can be skipped based on
+previous step output or variable values, enabling branching automation logic.
 
 Usage:
     python3 vnc-workflow.py run <workflow.yaml>
@@ -30,9 +33,28 @@ Workflow format (YAML):
       - id: click-button
         command: click
         args: ["{{button_coords.native_x}}", "{{button_coords.native_y}}", "--space", "native"]
+        when: "{{find-button.ok}} == true"   # only run if find-button succeeded
       - id: pause
         command: sleep
         args: ["0.5"]
+        when: "{{retries}} > 0"              # only run if variable retries > 0
+
+Conditional expressions (`when`):
+    Simple comparisons against interpolated left-hand side:
+      "{{step_id.field}} == value"           — equals (string or bool)
+      "{{step_id.field}} != value"           — not equals
+      "{{step_id.field}} > value"            — numeric greater-than
+      "{{step_id.field}} >= value"           — numeric greater-than-or-equal
+      "{{step_id.field}} < value"            — numeric less-than
+      "{{step_id.field}} <= value"           — numeric less-than-or-equal
+      "{{step_id.ok}} == true"               — boolean check
+      "{{step_id.ok}} != false"              — boolean check
+
+    Boolean shortcuts:
+      when: "true"                           — always execute (default)
+      when: "false"                          — always skip
+
+    When a step is skipped due to `when`, it appears in results with skipped=true.
 
 Variable interpolation:
     {{var_name}}               — top-level variable
@@ -182,6 +204,107 @@ def _deep_get(obj: Any, keys: List[str]) -> Any:
     return obj
 
 
+def evaluate_when(
+    when_expr: str,
+    variables: Dict[str, Any],
+    step_outputs: Dict[str, Any],
+) -> bool:
+    """
+    Evaluate a `when` conditional expression.
+
+    Supported forms:
+      "true" | "false"                        — literal bool
+      "<lhs> <op> <rhs>"                      — comparison
+        ops: == != > >= < <=
+        lhs may contain {{...}} interpolation
+        rhs is a bare literal (string, number, true/false)
+
+    Returns True (run step) or False (skip step).
+    Raises WorkflowError on evaluation failure.
+    """
+    expr = when_expr.strip()
+
+    # Literal shortcuts
+    if expr.lower() == "true":
+        return True
+    if expr.lower() == "false":
+        return False
+
+    # Parse: "<lhs> <op> <rhs>"
+    # Operators sorted longest-first to avoid partial matches (e.g. >= before >)
+    _OPS = ["!=", "==", ">=", "<=", ">", "<"]
+    op_found: Optional[str] = None
+    lhs_raw: str = ""
+    rhs_raw: str = ""
+
+    for op in _OPS:
+        idx = expr.find(op)
+        if idx != -1:
+            lhs_raw = expr[:idx].strip()
+            rhs_raw = expr[idx + len(op):].strip()
+            op_found = op
+            break
+
+    if op_found is None:
+        # No operator — treat as truthy string (non-empty interpolated value)
+        try:
+            resolved = interpolate(expr, variables, step_outputs)
+        except WorkflowError:
+            raise WorkflowError(f"when: could not interpolate expression: {expr!r}")
+        lv = str(resolved).lower()
+        return lv not in ("", "false", "0", "none", "null")
+
+    # Interpolate LHS and RHS (RHS may also contain {{...}} placeholders)
+    try:
+        lhs_resolved = interpolate(lhs_raw, variables, step_outputs)
+    except WorkflowError as e:
+        raise WorkflowError(f"when: {e}")
+
+    try:
+        rhs_resolved = interpolate(rhs_raw, variables, step_outputs)
+    except WorkflowError:
+        # RHS is a bare literal — use as-is
+        rhs_resolved = rhs_raw
+
+    lhs = str(lhs_resolved)
+    rhs = str(rhs_resolved).strip('"\'')  # strip optional quotes from literal
+
+    # Bool coercion helpers
+    def _to_bool(v: str) -> bool:
+        return v.lower() not in ("false", "0", "none", "null", "")
+
+    def _to_num(v: str) -> float:
+        try:
+            return float(v)
+        except ValueError:
+            raise WorkflowError(f"when: cannot compare non-numeric values with {op_found!r}: {v!r}")
+
+    try:
+        if op_found == "==":
+            # bool-aware: "true"/"false" literals
+            if rhs.lower() in ("true", "false"):
+                return _to_bool(lhs) == (rhs.lower() == "true")
+            return lhs == rhs
+        elif op_found == "!=":
+            if rhs.lower() in ("true", "false"):
+                return _to_bool(lhs) != (rhs.lower() == "true")
+            return lhs != rhs
+        elif op_found == ">":
+            return _to_num(lhs) > _to_num(rhs)
+        elif op_found == ">=":
+            return _to_num(lhs) >= _to_num(rhs)
+        elif op_found == "<":
+            return _to_num(lhs) < _to_num(rhs)
+        elif op_found == "<=":
+            return _to_num(lhs) <= _to_num(rhs)
+    except WorkflowError:
+        raise
+    except Exception as e:
+        raise WorkflowError(f"when: evaluation error: {e}")
+
+    return True  # unreachable
+
+
 def interpolate(value: Any, variables: Dict[str, Any], step_outputs: Dict[str, Any]) -> Any:
     """Recursively interpolate {{...}} placeholders in strings, lists, and dicts."""
     if isinstance(value, str):
@@ -282,6 +405,37 @@ def execute_step(
     retry_delay = float(step.get("retry_delay", 1.0))
     step_timeout = int(step.get("timeout", 60))
     save_output = step.get("save_output")
+    when_expr = step.get("when")
+
+    # Evaluate `when` conditional — skip step if expression is False
+    if when_expr is not None:
+        try:
+            should_run = evaluate_when(str(when_expr), variables, step_outputs)
+        except WorkflowError as e:
+            record = {
+                "id": step_id,
+                "command": command,
+                "ok": False,
+                "on_error": on_error,
+                "error": f"when evaluation failed: {e}",
+                "attempts": 0,
+                "duration_ms": 0,
+            }
+            return False, record
+        if not should_run:
+            record = {
+                "id": step_id,
+                "command": command,
+                "ok": True,   # skipped steps don't count as failures
+                "skipped": True,
+                "when": when_expr,
+                "reason": "when condition was false",
+                "attempts": 0,
+                "duration_ms": 0,
+            }
+            # Still register step_id in outputs so downstream {{step_id.skipped}} works
+            step_outputs[step_id] = {"skipped": True, "ok": True}
+            return True, record
 
     # Interpolate args
     try:
@@ -321,13 +475,22 @@ def execute_step(
     duration_ms = round((time.monotonic() - t_start) * 1000)
     step_ok = bool(last_result.get("ok"))
 
+    # Build the step output record: always includes 'ok', plus any data fields
+    data = last_result.get("data", {})
+    if isinstance(data, dict):
+        step_output_record: Dict[str, Any] = {"ok": step_ok, **data}
+    else:
+        step_output_record = {"ok": step_ok, "value": data}
+    # Also surface top-level fields from last_result (e.g. native_x, native_y)
+    for k, v in last_result.items():
+        if k not in ("ok", "data") and k not in step_output_record:
+            step_output_record[k] = v
+
     # Save output to variables if requested
     if save_output and step_ok:
-        data = last_result.get("data", last_result)
-        step_outputs[save_output] = data
-        # Also save by step ID for {{step_id.field}} access
+        step_outputs[save_output] = step_output_record
     # Always save under step ID
-    step_outputs[step_id] = last_result.get("data", last_result)
+    step_outputs[step_id] = step_output_record
 
     record = {
         "id": step_id,
@@ -383,14 +546,19 @@ def run_workflow(
             "steps_total": len(steps),
             "validation_errors": [],
             "steps": [
-                {"id": s.get("id", s.get("command", f"step_{i}")), "command": s.get("command"), "args": s.get("args", [])}
+                {
+                    "id": s.get("id", s.get("command", f"step_{i}")),
+                    "command": s.get("command"),
+                    "args": s.get("args", []),
+                    **({"when": s["when"]} if "when" in s else {}),
+                }
                 for i, s in enumerate(steps)
             ],
         }
 
     step_records: List[Dict[str, Any]] = []
     step_outputs: Dict[str, Any] = {}
-    passed = failed = skipped = 0
+    passed = failed = skipped = cond_skipped = 0
     workflow_ok = True
     t_start = time.monotonic()
 
@@ -398,14 +566,17 @@ def run_workflow(
         step_ok, record = execute_step(step, variables, step_outputs, extra_env)
         step_records.append(record)
 
-        if step_ok:
+        if record.get("skipped") and record.get("when") is not None:
+            # Conditional skip — not a failure, not a pass
+            cond_skipped += 1
+        elif step_ok:
             passed += 1
         else:
             failed += 1
             on_error = step.get("on_error", "stop")
             if on_error == "stop":
                 workflow_ok = False
-                # Mark remaining steps as skipped
+                # Mark remaining steps as skipped (error-abort)
                 for remaining in steps[len(step_records):]:
                     skipped += 1
                     step_records.append({
@@ -429,6 +600,7 @@ def run_workflow(
         "steps_passed": passed,
         "steps_failed": failed,
         "steps_skipped": skipped,
+        "steps_conditional_skipped": cond_skipped,
         "duration_ms": total_duration_ms,
         "steps": step_records,
     }

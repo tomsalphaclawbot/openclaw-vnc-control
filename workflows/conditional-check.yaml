@@ -1,0 +1,44 @@
+name: conditional-check
+description: >
+  Demonstrate Phase 16 conditional step execution.
+  Run two branches based on a variable: if mode == "verbose", emit extra
+  diagnostic messages; if mode == "quiet", skip them.
+
+variables:
+  mode: "verbose"
+  threshold: "5"
+  count: "3"
+
+steps:
+  - id: always-run
+    command: echo
+    args: ["Workflow started in {{mode}} mode"]
+
+  - id: verbose-header
+    command: echo
+    args: ["[verbose] Diagnostic output enabled"]
+    when: "{{mode}} == verbose"
+
+  - id: below-threshold
+    command: echo
+    args: ["Count {{count}} is below threshold {{threshold}}"]
+    when: "{{count}} < {{threshold}}"
+
+  - id: above-threshold
+    command: echo
+    args: ["Count {{count}} has reached or exceeded threshold {{threshold}}"]
+    when: "{{count}} >= {{threshold}}"
+
+  - id: verbose-footer
+    command: echo
+    args: ["[verbose] Diagnostic block complete"]
+    when: "{{mode}} == verbose"
+
+  - id: quiet-note
+    command: echo
+    args: ["Running in quiet mode — diagnostics suppressed"]
+    when: "{{mode}} == quiet"
+
+  - id: always-finish
+    command: echo
+    args: ["Workflow complete"]

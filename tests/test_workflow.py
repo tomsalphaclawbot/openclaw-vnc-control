@@ -23,6 +23,7 @@ sys.path.insert(0, str(_ROOT))
 from vnc_workflow import (  # noqa: E402
     validate_workflow,
     interpolate,
+    evaluate_when,
     run_workflow,
     load_workflow_str,
     WorkflowError,
@@ -442,3 +443,203 @@ class TestCLI:
         proc = self._run()
         # Should not crash — exit 0 or non-zero with usage info
         assert proc.stdout or proc.stderr or proc.returncode == 0
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Phase 16 — Conditional Step Execution (when)
+# ══════════════════════════════════════════════════════════════════════════
+
+class TestEvaluateWhen:
+    """Unit tests for evaluate_when()."""
+
+    # ── Literal shortcuts ────────────────────────────────────────────────
+
+    def test_literal_true(self):
+        assert evaluate_when("true", {}, {}) is True
+
+    def test_literal_false(self):
+        assert evaluate_when("false", {}, {}) is False
+
+    def test_literal_true_uppercase(self):
+        assert evaluate_when("True", {}, {}) is True
+
+    # ── Equality ==  ────────────────────────────────────────────────────
+
+    def test_string_eq_match(self):
+        assert evaluate_when("{{mode}} == verbose", {"mode": "verbose"}, {}) is True
+
+    def test_string_eq_no_match(self):
+        assert evaluate_when("{{mode}} == verbose", {"mode": "quiet"}, {}) is False
+
+    def test_bool_eq_true(self):
+        # ok field from step output is a Python bool
+        assert evaluate_when("{{s1.ok}} == true", {}, {"s1": {"ok": True}}) is True
+
+    def test_bool_eq_false_literal(self):
+        assert evaluate_when("{{s1.ok}} == false", {}, {"s1": {"ok": False}}) is True
+
+    def test_bool_eq_mismatch(self):
+        assert evaluate_when("{{s1.ok}} == true", {}, {"s1": {"ok": False}}) is False
+
+    # ── Inequality != ────────────────────────────────────────────────────
+
+    def test_string_neq_different(self):
+        assert evaluate_when("{{mode}} != quiet", {"mode": "verbose"}, {}) is True
+
+    def test_string_neq_same(self):
+        assert evaluate_when("{{mode}} != verbose", {"mode": "verbose"}, {}) is False
+
+    # ── Numeric comparisons ──────────────────────────────────────────────
+
+    def test_numeric_gt_true(self):
+        assert evaluate_when("{{count}} > 3", {"count": "5"}, {}) is True
+
+    def test_numeric_gt_false(self):
+        assert evaluate_when("{{count}} > 10", {"count": "5"}, {}) is False
+
+    def test_numeric_gte_equal(self):
+        assert evaluate_when("{{count}} >= 5", {"count": "5"}, {}) is True
+
+    def test_numeric_lt_true(self):
+        assert evaluate_when("{{count}} < {{threshold}}", {"count": "3", "threshold": "5"}, {}) is True
+
+    def test_numeric_lt_false(self):
+        assert evaluate_when("{{count}} < {{threshold}}", {"count": "7", "threshold": "5"}, {}) is False
+
+    def test_numeric_lte_equal(self):
+        assert evaluate_when("{{count}} <= 5", {"count": "5"}, {}) is True
+
+    # ── Step output reference ────────────────────────────────────────────
+
+    def test_step_output_eq(self):
+        assert evaluate_when("{{check.result}} == pass", {}, {"check": {"result": "pass"}}) is True
+
+    def test_step_output_neq(self):
+        assert evaluate_when("{{check.result}} != fail", {}, {"check": {"result": "pass"}}) is True
+
+    # ── Error cases ──────────────────────────────────────────────────────
+
+    def test_unknown_variable_raises(self):
+        with pytest.raises(WorkflowError, match="when"):
+            evaluate_when("{{missing_var}} == x", {}, {})
+
+    def test_non_numeric_gt_raises(self):
+        with pytest.raises(WorkflowError, match="non-numeric"):
+            evaluate_when("{{s}} > 5", {"s": "hello"}, {})
+
+
+class TestConditionalStepExecution:
+    """Integration tests: when in run_workflow() using builtin commands only."""
+
+    def _wf(self, steps, variables=None):
+        wf = {"name": "cond-test", "steps": steps}
+        if variables:
+            wf["variables"] = variables
+        return wf
+
+    def test_when_true_step_runs(self):
+        wf = self._wf([
+            {"id": "s1", "command": "echo", "args": ["hello"], "when": "true"},
+        ])
+        result = run_workflow(wf)
+        assert result["ok"] is True
+        assert not result["steps"][0].get("skipped")  # not skipped
+        assert result["steps_passed"] == 1
+        assert result["steps_conditional_skipped"] == 0
+
+    def test_when_false_step_skipped(self):
+        wf = self._wf([
+            {"id": "s1", "command": "echo", "args": ["should skip"], "when": "false"},
+            {"id": "s2", "command": "echo", "args": ["should run"]},
+        ])
+        result = run_workflow(wf)
+        assert result["ok"] is True
+        assert result["steps"][0]["skipped"] is True
+        assert result["steps"][1].get("skipped") is not True
+        assert result["steps_conditional_skipped"] == 1
+        assert result["steps_passed"] == 1  # s2 ran
+
+    def test_when_variable_match(self):
+        wf = self._wf(
+            steps=[
+                {"id": "s1", "command": "echo", "args": ["verbose"], "when": "{{mode}} == verbose"},
+                {"id": "s2", "command": "echo", "args": ["quiet"], "when": "{{mode}} == quiet"},
+            ],
+            variables={"mode": "verbose"},
+        )
+        result = run_workflow(wf)
+        assert result["ok"] is True
+        assert result["steps"][0].get("skipped") is not True  # s1 ran
+        assert result["steps"][1]["skipped"] is True           # s2 skipped
+        assert result["steps_conditional_skipped"] == 1
+        assert result["steps_passed"] == 1
+
+    def test_when_step_output_ok_true(self):
+        """Step 2 runs only if step 1 succeeded (ok==true)."""
+        wf = self._wf(steps=[
+            {"id": "check", "command": "echo", "args": ["ping"]},
+            {"id": "follow", "command": "echo", "args": ["ok!"], "when": "{{check.ok}} == true"},
+        ])
+        result = run_workflow(wf)
+        assert result["ok"] is True
+        assert result["steps"][0].get("skipped") is not True
+        assert result["steps"][1].get("skipped") is not True
+        assert result["steps_passed"] == 2
+        assert result["steps_conditional_skipped"] == 0
+
+    def test_when_numeric_comparison(self):
+        """Steps guarded by numeric thresholds."""
+        wf = self._wf(
+            steps=[
+                {"id": "lo", "command": "echo", "args": ["low"],  "when": "{{x}} < 5"},
+                {"id": "hi", "command": "echo", "args": ["high"], "when": "{{x}} >= 5"},
+            ],
+            variables={"x": "3"},
+        )
+        result = run_workflow(wf)
+        assert result["ok"] is True
+        assert result["steps"][0].get("skipped") is not True  # x=3 < 5 → run
+        assert result["steps"][1]["skipped"] is True           # x=3 >= 5 → skip
+        assert result["steps_conditional_skipped"] == 1
+
+    def test_conditional_skipped_step_not_counted_as_failure(self):
+        """Conditional skips must not set ok=False on the workflow."""
+        wf = self._wf(steps=[
+            {"id": "s1", "command": "echo", "args": ["a"], "when": "false"},
+            {"id": "s2", "command": "echo", "args": ["a"], "when": "false"},
+        ])
+        result = run_workflow(wf)
+        assert result["ok"] is True
+        assert result["steps_failed"] == 0
+        assert result["steps_conditional_skipped"] == 2
+
+    def test_skipped_step_registers_in_outputs(self):
+        """Downstream step can reference {{skipped_step.skipped}} == true."""
+        wf = self._wf(steps=[
+            {"id": "maybe", "command": "echo", "args": ["skip me"], "when": "false"},
+            {
+                "id": "report",
+                "command": "echo",
+                "args": ["skipped={{maybe.skipped}}"],
+                "when": "{{maybe.skipped}} == true",
+            },
+        ])
+        result = run_workflow(wf)
+        assert result["ok"] is True
+        # Both steps resolve: maybe is conditionally skipped; report also skipped
+        # (because its when reads the saved output {{maybe.skipped}} == True → runs)
+        assert result["steps_conditional_skipped"] >= 1
+
+    def test_conditional_workflow_yaml_file(self, tmp_path):
+        """Load and execute the sample conditional workflow YAML."""
+        wf_path = Path(__file__).parent.parent / "workflows" / "conditional-check.yaml"
+        if not wf_path.exists():
+            pytest.skip("conditional-check.yaml not found")
+        from vnc_workflow import load_workflow
+        wf = load_workflow(str(wf_path))
+        result = run_workflow(wf)
+        assert result["ok"] is True
+        # mode=verbose → verbose steps run, quiet-note skipped
+        cond_skip_ids = [s["id"] for s in result["steps"] if s.get("skipped") and s.get("when")]
+        assert "quiet-note" in cond_skip_ids
+        assert "above-threshold" in cond_skip_ids  # count=3 < threshold=5, so above skipped
