@@ -904,3 +904,126 @@ class TestPhase13Clipboard:
         import types
         assert hasattr(vnc, "cmd_clipboard")
         assert callable(vnc.cmd_clipboard)
+
+
+class TestPhase14OCR:
+    """Unit tests for Phase 14 read_text OCR command."""
+
+    def test_cli_read_text_screen_help(self):
+        """read_text subcommand should appear in --help output."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        assert "read_text" in result.stdout
+
+    def test_cli_read_text_choices(self):
+        """read_text should accept 'screen' and 'file' sources."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "read_text", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        assert "screen" in result.stdout
+        assert "file" in result.stdout
+
+    def test_cli_read_text_invalid_source(self):
+        """read_text with invalid source should exit non-zero."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "read_text", "ftp"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode != 0
+
+    def test_cmd_read_text_registered(self):
+        """cmd_read_text should be importable and callable."""
+        assert hasattr(vnc, "cmd_read_text")
+        assert callable(vnc.cmd_read_text)
+
+    def test_read_text_file_not_found(self):
+        """read_text file with missing path returns ok=False JSON (exits 1)."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "read_text", "file", "/tmp/nonexistent_abc123.png"],
+            capture_output=True, text=True, timeout=10,
+        )
+        # Script exits non-zero and outputs error JSON
+        assert result.returncode != 0 or result.stdout.strip()
+        data = json.loads(result.stdout)
+        assert data["ok"] is False
+        assert "not found" in data.get("error", "").lower()
+
+    def test_read_text_file_valid_image(self, tmp_path):
+        """read_text file should OCR a simple synthetic image."""
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            import pytesseract
+        except ImportError:
+            pytest.skip("Pillow or pytesseract not installed")
+
+        # Create a white image with black text
+        img = Image.new("RGB", (400, 80), color="white")
+        draw = ImageDraw.Draw(img)
+        draw.text((10, 10), "Hello OCR", fill="black")
+        img_path = str(tmp_path / "test_ocr.png")
+        img.save(img_path)
+
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "read_text", "file", img_path],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        assert "text" in data
+        assert "char_count" in data
+        assert "line_count" in data
+        assert "lang" in data
+
+    def test_read_text_file_raw_flag(self, tmp_path):
+        """read_text file --raw should include words array with confidence."""
+        try:
+            from PIL import Image, ImageDraw
+            import pytesseract
+        except ImportError:
+            pytest.skip("Pillow or pytesseract not installed")
+
+        img = Image.new("RGB", (300, 60), color="white")
+        draw = ImageDraw.Draw(img)
+        draw.text((10, 10), "Alpha", fill="black")
+        img_path = str(tmp_path / "test_raw.png")
+        img.save(img_path)
+
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "read_text", "file", img_path, "--raw"],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        assert "words" in data
+        assert isinstance(data["words"], list)
+
+    def test_read_text_region_crop(self, tmp_path):
+        """read_text file --region should crop before OCR without error."""
+        try:
+            from PIL import Image, ImageDraw
+            import pytesseract
+        except ImportError:
+            pytest.skip("Pillow or pytesseract not installed")
+
+        img = Image.new("RGB", (500, 200), color="white")
+        draw = ImageDraw.Draw(img)
+        draw.text((50, 50), "Region Text", fill="black")
+        img_path = str(tmp_path / "test_region.png")
+        img.save(img_path)
+
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "read_text", "file", img_path,
+             "--region", "0", "0", "400", "150"],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        assert "text" in data

@@ -2335,6 +2335,20 @@ def main():
     p.add_argument("--continue-on-error", dest="continue_on_error", action="store_true",
                    help="On play: continue past failed steps instead of aborting")
 
+    p = sub.add_parser("read_text", help="[Phase 14] OCR text extraction from screenshot or image file")
+    p.add_argument("read_text_source", choices=["screen", "file"],
+                   help="screen: live screenshot | file: existing image path")
+    p.add_argument("read_text_file", nargs="?", default=None,
+                   help="Image file path (required when source=file)")
+    p.add_argument("--region", nargs=4, metavar=("X1", "Y1", "X2", "Y2"),
+                   help="Crop to region before OCR (screenshot coordinates)")
+    p.add_argument("--lang", default="eng", help="Tesseract language code (default: eng)")
+    p.add_argument("--psm", type=int, default=3,
+                   help="Page segmentation mode 0-13 (default: 3=auto)")
+    p.add_argument("--out", default=None, help="Save intermediate image used for OCR to FILE")
+    p.add_argument("--raw", action="store_true",
+                   help="Include per-word confidence + bounding boxes in output")
+
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
                    help="list: show all sessions | show NAME: show a specific session config")
@@ -2368,6 +2382,7 @@ def main():
         "annotate": cmd_annotate,
         "macro": cmd_macro,
         "clipboard": cmd_clipboard,
+        "read_text": cmd_read_text,
     }[args.command](args, config)
 
 
@@ -2544,6 +2559,129 @@ def _cmd_sessions(args):
             })
         else:
             result_json(True, {"sessions": sessions, "default": default, "count": len(sessions)})
+
+
+def cmd_read_text(args, _config):
+    """Phase 14: OCR text extraction from screenshot or image file.
+
+    Uses Tesseract OCR (via pytesseract) to extract visible text from a
+    screenshot or image file. Can optionally crop to a region first.
+
+    Subactions:
+      screen      — Take a live screenshot and OCR it
+      file FILE   — OCR an existing image file
+
+    Options:
+      --region X1 Y1 X2 Y2  — Crop to region before OCR (screenshot space)
+      --lang LANG            — Tesseract language (default: eng)
+      --psm PSM              — Page segmentation mode (default: 3 = auto)
+      --out FILE             — Save intermediate image used for OCR
+      --raw                  — Include raw Tesseract data (confidence, boxes)
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError as exc:
+        result_json(False, error=f"pytesseract/Pillow not installed: {exc}. Run: pip install pytesseract Pillow")
+        return
+
+    source = args.read_text_source  # "screen" or "file"
+    lang = getattr(args, "lang", "eng") or "eng"
+    psm = getattr(args, "psm", 3)
+    out_path = getattr(args, "out", None)
+    raw_mode = getattr(args, "raw", False)
+
+    # --- Acquire image ---
+    if source == "screen":
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        tmp.close()
+        img_path = tmp.name
+        # Take screenshot at full scale (for best OCR quality)
+        import argparse as _ap
+        fake_args = _ap.Namespace(
+            host=args.host if hasattr(args, "host") else None,
+            port=args.port if hasattr(args, "port") else None,
+            password=args.password if hasattr(args, "password") else None,
+            username=args.username if hasattr(args, "username") else None,
+            session=args.session if hasattr(args, "session") else None,
+            format="png",
+            scale=1.0,
+            quality=95,
+            out=img_path,
+            profile=getattr(args, "profile", DEFAULT_PROFILE),
+        )
+        cmd_screenshot(fake_args, _config)
+    elif source == "file":
+        img_path = args.read_text_file
+        if not os.path.exists(img_path):
+            result_json(False, error=f"File not found: {img_path}")
+            return
+    else:
+        result_json(False, error=f"Unknown source: {source}")
+        return
+
+    # --- Optional region crop ---
+    region = getattr(args, "region", None)
+    if region:
+        try:
+            x1, y1, x2, y2 = [int(v) for v in region]
+            img = Image.open(img_path)
+            img = img.crop((x1, y1, x2, y2))
+            crop_tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            crop_tmp.close()
+            img.save(crop_tmp.name)
+            if source == "screen":
+                os.unlink(img_path)
+            img_path = crop_tmp.name
+        except Exception as exc:
+            result_json(False, error=f"Region crop failed: {exc}")
+            return
+
+    # --- Optionally save intermediate image ---
+    if out_path:
+        import shutil
+        shutil.copy(img_path, out_path)
+
+    # --- Run OCR ---
+    try:
+        img = Image.open(img_path)
+        config_str = f"--psm {psm}"
+        text = pytesseract.image_to_string(img, lang=lang, config=config_str).strip()
+
+        payload = {
+            "text": text,
+            "char_count": len(text),
+            "line_count": len([l for l in text.splitlines() if l.strip()]),
+            "source": source,
+            "lang": lang,
+            "psm": psm,
+        }
+
+        if raw_mode:
+            data = pytesseract.image_to_data(img, lang=lang, config=config_str,
+                                              output_type=pytesseract.Output.DICT)
+            words = [
+                {"text": w, "conf": c, "left": l, "top": t, "width": wd, "height": h}
+                for w, c, l, t, wd, h in zip(
+                    data["text"], data["conf"], data["left"], data["top"],
+                    data["width"], data["height"]
+                )
+                if w.strip() and c != "-1"
+            ]
+            payload["words"] = words
+            payload["word_count"] = len(words)
+
+        result_json(True, payload)
+
+    except Exception as exc:
+        result_json(False, error=f"OCR failed: {exc}")
+    finally:
+        # Cleanup temp files
+        if source == "screen" or (region and img_path != (args.read_text_file if source == "file" else "")):
+            try:
+                os.unlink(img_path)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":
