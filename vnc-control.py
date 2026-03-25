@@ -1726,6 +1726,208 @@ def cmd_crop(args, _config):
     })
 
 
+def cmd_macro(args, config):
+    """Phase 12: Macro recording and playback.
+
+    record: Read a sequence of action dicts from stdin (one JSON per line) and
+            append them (with timestamps) to a macro file.
+    play:   Replay a recorded macro, executing each action in order.
+    list:   Print the actions stored in a macro file.
+
+    Macro file format: JSON array of step objects, each with keys:
+        type      - action type (click/type/key/scroll/drag/move/wait)
+        params    - dict of parameters for that action
+        delay_ms  - milliseconds to wait BEFORE this step (0 for first step)
+
+    Example step:
+        {"type": "click", "params": {"x": 100, "y": 200, "space": "screenshot"}, "delay_ms": 500}
+
+    record mode reads JSON lines from stdin until EOF:
+        echo '{"type":"click","params":{"x":100,"y":200}}' | vnc-control macro record my.json
+    """
+    subaction = args.subaction
+    macro_file = Path(args.macro_file)
+
+    if subaction == "list":
+        if not macro_file.exists():
+            result_json(False, error=f"Macro file not found: {macro_file}")
+            return
+        try:
+            steps = json.loads(macro_file.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            result_json(False, error=f"Failed to read macro: {e}")
+            return
+        result_json(True, {
+            "file": str(macro_file),
+            "step_count": len(steps),
+            "steps": steps,
+            "total_delay_ms": sum(s.get("delay_ms", 0) for s in steps),
+        })
+        return
+
+    if subaction == "record":
+        # Read one JSON step per line from stdin
+        steps = []
+        if macro_file.exists():
+            try:
+                steps = json.loads(macro_file.read_text())
+            except (json.JSONDecodeError, OSError):
+                steps = []
+        prev_time = None
+        added = 0
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                step = json.loads(line)
+            except json.JSONDecodeError as e:
+                # Emit warning but continue
+                print(json.dumps({"warning": f"skipped invalid JSON: {e}", "line": line}),
+                      file=sys.stderr)
+                continue
+            now = time.time()
+            delay_ms = int((now - prev_time) * 1000) if prev_time is not None else 0
+            prev_time = now
+            step.setdefault("delay_ms", delay_ms)
+            steps.append(step)
+            added += 1
+        macro_file.parent.mkdir(parents=True, exist_ok=True)
+        macro_file.write_text(json.dumps(steps, indent=2))
+        result_json(True, {
+            "file": str(macro_file),
+            "steps_added": added,
+            "total_steps": len(steps),
+        })
+        return
+
+    if subaction == "play":
+        if not macro_file.exists():
+            result_json(False, error=f"Macro file not found: {macro_file}")
+            return
+        try:
+            steps = json.loads(macro_file.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            result_json(False, error=f"Failed to read macro: {e}")
+            return
+        delay_scale = getattr(args, "delay_scale", 1.0)
+        results = []
+        for i, step in enumerate(steps):
+            action_type = step.get("type")
+            params = step.get("params", {})
+            delay_ms = int(step.get("delay_ms", 0) * delay_scale)
+            if delay_ms > 0:
+                time.sleep(delay_ms / 1000.0)
+            try:
+                if action_type == "click":
+                    x = params.get("x", 0)
+                    y = params.get("y", 0)
+                    space = params.get("space", "screenshot")
+                    button = params.get("button", "left")
+                    nx, ny = _resolve_coords(x, y, space, config)
+                    run_vncdo(config, ["click", str(nx), str(ny), button])
+                    results.append({"step": i, "type": action_type, "ok": True})
+                elif action_type == "move":
+                    x = params.get("x", 0)
+                    y = params.get("y", 0)
+                    space = params.get("space", "screenshot")
+                    nx, ny = _resolve_coords(x, y, space, config)
+                    run_vncdo(config, ["move", str(nx), str(ny)])
+                    results.append({"step": i, "type": action_type, "ok": True})
+                elif action_type == "type":
+                    text = params.get("text", "")
+                    run_vncdo(config, ["type", text])
+                    results.append({"step": i, "type": action_type, "ok": True})
+                elif action_type == "key":
+                    keys = params.get("keys", [])
+                    if isinstance(keys, str):
+                        keys = [keys]
+                    run_vncdo(config, ["key"] + keys)
+                    results.append({"step": i, "type": action_type, "ok": True})
+                elif action_type == "scroll":
+                    x = params.get("x", 0)
+                    y = params.get("y", 0)
+                    space = params.get("space", "screenshot")
+                    direction = params.get("direction", "down")
+                    clicks = params.get("clicks", 3)
+                    nx, ny = _resolve_coords(x, y, space, config)
+                    btn = {"up": "4", "down": "5", "left": "4", "right": "5"}.get(direction, "5")
+                    for _ in range(int(clicks)):
+                        run_vncdo(config, ["click", str(nx), str(ny), btn])
+                    results.append({"step": i, "type": action_type, "ok": True})
+                elif action_type == "drag":
+                    x1 = params.get("x1", 0)
+                    y1 = params.get("y1", 0)
+                    x2 = params.get("x2", 0)
+                    y2 = params.get("y2", 0)
+                    space = params.get("space", "screenshot")
+                    nx1, ny1 = _resolve_coords(x1, y1, space, config)
+                    nx2, ny2 = _resolve_coords(x2, y2, space, config)
+                    run_vncdo(config, ["mousedown", str(nx1), str(ny1)])
+                    run_vncdo(config, ["mousemove", str(nx2), str(ny2)])
+                    run_vncdo(config, ["mouseup", str(nx2), str(ny2)])
+                    results.append({"step": i, "type": action_type, "ok": True})
+                elif action_type == "wait":
+                    ms = params.get("ms", 500)
+                    time.sleep(ms / 1000.0)
+                    results.append({"step": i, "type": action_type, "ok": True, "waited_ms": ms})
+                else:
+                    err_msg = f"Unknown action type: {action_type}"
+                    results.append({"step": i, "type": action_type, "ok": False,
+                                    "error": err_msg})
+                    if not getattr(args, "continue_on_error", False):
+                        result_json(False, {
+                            "aborted_at_step": i,
+                            "error": err_msg,
+                            "steps_completed": i,
+                            "results": results,
+                        })
+                        return
+                    continue
+            except Exception as e:  # noqa: BLE001
+                results.append({"step": i, "type": action_type, "ok": False, "error": str(e)})
+                if not getattr(args, "continue_on_error", False):
+                    result_json(False, {
+                        "aborted_at_step": i,
+                        "error": str(e),
+                        "steps_completed": i,
+                        "results": results,
+                    })
+                    return
+        ok_count = sum(1 for r in results if r.get("ok"))
+        result_json(ok_count == len(steps), {
+            "file": str(macro_file),
+            "steps_total": len(steps),
+            "steps_ok": ok_count,
+            "steps_failed": len(steps) - ok_count,
+            "delay_scale": delay_scale,
+            "results": results,
+        })
+        return
+
+    result_json(False, error=f"Unknown subaction: {subaction}")
+
+
+def _resolve_coords(x, y, space, config):
+    """Resolve (x, y) from the given space to native VNC coordinates.
+
+    This is a lightweight version of the logic in cmd_click/cmd_map,
+    extracted for reuse by the macro player.
+    """
+    if space == "native":
+        return int(x), int(y)
+    if space == "normalized":
+        nw = config.get("native_width") or 1920
+        nh = config.get("native_height") or 1080
+        return int(x * nw), int(y * nh)
+    # screenshot space: scale factor needed
+    scale = config.get("scale", DEFAULT_SCALE)
+    # screenshot coords = native * scale  →  native = screenshot / scale
+    if scale and scale != 1.0:
+        return int(x / scale), int(y / scale)
+    return int(x), int(y)
+
+
 def cmd_annotate(args, _config):
     """Phase 11: Annotate a screenshot with labeled shapes.
 
@@ -2113,6 +2315,15 @@ def main():
                    help="JPEG quality (default: 80)")
 
     # sessions - list/show named session registry
+    p = sub.add_parser("macro", help="[Phase 12] Record and replay VNC action macros")
+    p.add_argument("subaction", choices=["record", "play", "list"],
+                   help="record: append stdin JSON steps | play: replay | list: inspect")
+    p.add_argument("macro_file", help="Path to macro JSON file")
+    p.add_argument("--delay-scale", dest="delay_scale", type=float, default=1.0,
+                   help="Scale replay delays (default 1.0; 0=no delays, 0.5=half speed, 2=double)")
+    p.add_argument("--continue-on-error", dest="continue_on_error", action="store_true",
+                   help="On play: continue past failed steps instead of aborting")
+
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
                    help="list: show all sessions | show NAME: show a specific session config")
@@ -2144,6 +2355,7 @@ def main():
         "diff": cmd_diff,
         "crop": cmd_crop,
         "annotate": cmd_annotate,
+        "macro": cmd_macro,
     }[args.command](args, config)
 
 
