@@ -32,4 +32,4 @@ jobs:
           VNC_USERNAME: ""
           VNC_PASSWORD: ""
         run: |
-          pytest tests/test_unit.py -v --timeout=30
+          pytest tests/test_unit.py tests/test_workflow.py -v --timeout=30

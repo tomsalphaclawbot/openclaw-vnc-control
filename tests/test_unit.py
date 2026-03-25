@@ -7,6 +7,7 @@ All tests here run offline against pure-Python logic.
 import importlib.util
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -962,6 +963,8 @@ class TestPhase14OCR:
             import pytesseract
         except ImportError:
             pytest.skip("Pillow or pytesseract not installed")
+        if not shutil.which("tesseract"):
+            pytest.skip("tesseract binary not in PATH")
 
         # Create a white image with black text
         img = Image.new("RGB", (400, 80), color="white")
@@ -989,6 +992,8 @@ class TestPhase14OCR:
             import pytesseract
         except ImportError:
             pytest.skip("Pillow or pytesseract not installed")
+        if not shutil.which("tesseract"):
+            pytest.skip("tesseract binary not in PATH")
 
         img = Image.new("RGB", (300, 60), color="white")
         draw = ImageDraw.Draw(img)
@@ -1013,6 +1018,8 @@ class TestPhase14OCR:
             import pytesseract
         except ImportError:
             pytest.skip("Pillow or pytesseract not installed")
+        if not shutil.which("tesseract"):
+            pytest.skip("tesseract binary not in PATH")
 
         img = Image.new("RGB", (500, 200), color="white")
         draw = ImageDraw.Draw(img)
