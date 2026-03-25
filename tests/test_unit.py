@@ -621,3 +621,124 @@ class TestPhase9ImageDiff:
 
 
 import subprocess
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 — crop (Region-of-Interest)
+# ---------------------------------------------------------------------------
+
+class TestPhase10Crop:
+    """Tests for the crop command (Phase 10 ROI extraction)."""
+
+    def _make_image(self, path, size=(200, 150), color=(100, 150, 200)):
+        from PIL import Image
+        img = Image.new("RGB", size, color)
+        img.save(str(path))
+        return str(path)
+
+    def test_basic_crop_screenshot_space(self, tmp_path):
+        """Crop a region in screenshot space and verify dimensions."""
+        src = self._make_image(tmp_path / "src.png", size=(200, 150))
+        out = str(tmp_path / "crop.jpg")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "crop", src, "10", "20", "110", "80",
+             "--out", out],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        assert data["action"] == "crop"
+        assert data["crop_dimensions"]["w"] == 100
+        assert data["crop_dimensions"]["h"] == 60
+        assert data["screenshot_coords"] == {"x1": 10, "y1": 20, "x2": 110, "y2": 80}
+        assert os.path.exists(out)
+
+    def test_crop_normalized_space(self, tmp_path):
+        """Crop using normalized coordinates (0..1)."""
+        src = self._make_image(tmp_path / "src.png", size=(200, 100))
+        out = str(tmp_path / "crop_norm.jpg")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "crop", src,
+             "0.0", "0.0", "0.5", "1.0",
+             "--space", "normalized", "--out", out],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        # 50% of 200 wide, 100% of 100 tall
+        assert data["crop_dimensions"]["w"] == 100
+        assert data["crop_dimensions"]["h"] == 100
+        assert data["input_space"] == "normalized"
+
+    def test_crop_clamped_to_bounds(self, tmp_path):
+        """Coordinates outside image bounds are clamped, not errored."""
+        src = self._make_image(tmp_path / "src.png", size=(100, 100))
+        out = str(tmp_path / "crop_clamp.jpg")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "crop", src,
+             "80", "80", "999", "999", "--out", out],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        # Clamped: x2=100, y2=100 (image boundary)
+        assert data["screenshot_coords"]["x2"] == 100
+        assert data["screenshot_coords"]["y2"] == 100
+        assert data["crop_dimensions"]["w"] == 20
+        assert data["crop_dimensions"]["h"] == 20
+
+    def test_crop_swapped_coords_normalized(self, tmp_path):
+        """x1 > x2 (swapped) should be auto-corrected."""
+        src = self._make_image(tmp_path / "src.png", size=(200, 200))
+        out = str(tmp_path / "crop_swap.jpg")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "crop", src,
+             "150", "150", "50", "50", "--out", out],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        # Should swap so x1=50, y1=50, x2=150, y2=150
+        assert data["crop_dimensions"]["w"] == 100
+        assert data["crop_dimensions"]["h"] == 100
+
+    def test_crop_coverage_pct(self, tmp_path):
+        """Coverage percentage reflects proportion of image area cropped."""
+        src = self._make_image(tmp_path / "src.png", size=(100, 100))
+        out = str(tmp_path / "crop_cov.jpg")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "crop", src,
+             "0", "0", "50", "50", "--out", out],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        # 50x50 out of 100x100 = 25%
+        assert data["coverage_pct"] == pytest.approx(25.0, abs=0.5)
+
+    def test_crop_missing_source(self, tmp_path):
+        """Missing source image should return ok=false and non-zero exit."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "crop", str(tmp_path / "nonexistent.png"),
+             "0", "0", "50", "50"],
+            capture_output=True, text=True, timeout=10,
+        )
+        # result_json(False,...) exits with code 1
+        assert result.returncode != 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is False
+
+    def test_crop_parser_registered(self):
+        """crop subcommand should be registered in argparse."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "crop", "--help"],
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode == 0
+        assert "crop" in result.stdout.lower()
+        assert "source" in result.stdout.lower()
+        assert "space" in result.stdout.lower()

@@ -1600,6 +1600,132 @@ def cmd_drag(args, config):
         result_json(False, error=f"Drag failed: {stderr.strip()}", data=data)
 
 
+def cmd_crop(args, _config):
+    """Phase 10: Region-of-Interest (ROI) crop.
+
+    Crops an existing screenshot to a bounding box (x, y, x2, y2) in screenshot
+    space, and saves the cropped region as a new image.
+
+    Coordinate input:
+      --space screenshot (default): coords in screenshot-space pixels
+      --space native: coords in native VNC pixels (divided by scale)
+      --space normalized: coords as 0..1 fractions of screenshot dimensions
+
+    Use cases:
+      - Feed a focused crop to vision API instead of full screen (cheaper/faster)
+      - Isolate a form, dialog, or region for targeted analysis
+      - Compare crops before/after an action for precise change detection
+
+    Returns JSON with the cropped image path, dimensions, and source bounding box.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        result_json(False, error="Phase 10 requires Pillow (pip install Pillow)")
+        return
+
+    src_path = args.source
+    if not os.path.exists(src_path):
+        result_json(False, error=f"Source image not found: {src_path}")
+        return
+
+    try:
+        img = Image.open(src_path)
+    except Exception as e:
+        result_json(False, error=f"Cannot open source image: {e}")
+        return
+
+    img_w, img_h = img.size
+    space = getattr(args, "space", "screenshot")
+
+    # Parse crop coordinates
+    x1_in = args.x1
+    y1_in = args.y1
+    x2_in = args.x2
+    y2_in = args.y2
+
+    if space == "normalized":
+        # Normalized: 0..1 fractions relative to image dimensions
+        x1 = int(x1_in * img_w)
+        y1 = int(y1_in * img_h)
+        x2 = int(x2_in * img_w)
+        y2 = int(y2_in * img_h)
+    elif space == "native":
+        # Native VNC coords: determine scale used when screenshot was captured
+        last = load_last_capture_state()
+        scale = last.get("scale", DEFAULT_SCALE) if last else DEFAULT_SCALE
+        if scale and scale > 0:
+            x1 = int(x1_in * scale)
+            y1 = int(y1_in * scale)
+            x2 = int(x2_in * scale)
+            y2 = int(y2_in * scale)
+        else:
+            x1, y1, x2, y2 = int(x1_in), int(y1_in), int(x2_in), int(y2_in)
+    else:
+        # Screenshot space: direct pixel coords in the source image
+        x1, y1, x2, y2 = int(x1_in), int(y1_in), int(x2_in), int(y2_in)
+
+    # Ensure x1 < x2 and y1 < y2
+    if x1 > x2:
+        x1, x2 = x2, x1
+    if y1 > y2:
+        y1, y2 = y2, y1
+
+    # Clamp to image bounds
+    x1 = max(0, min(x1, img_w))
+    y1 = max(0, min(y1, img_h))
+    x2 = max(0, min(x2, img_w))
+    y2 = max(0, min(y2, img_h))
+
+    if x2 <= x1 or y2 <= y1:
+        result_json(False, error=f"Invalid crop region: ({x1},{y1})→({x2},{y2}) — zero or negative area after clamping")
+        img.close()
+        return
+
+    # Crop
+    cropped = img.crop((x1, y1, x2, y2))
+    img.close()
+
+    # Determine output path
+    out_path = getattr(args, "out", None)
+    if not out_path:
+        fmt_ext = "jpg" if getattr(args, "format", None) in (None, "jpeg", "jpg") else "png"
+        out_path = tmpfile("crop", fmt_ext)
+    else:
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+
+    out_fmt = getattr(args, "format", None) or "jpeg"
+    quality = getattr(args, "quality", None) or DEFAULT_QUALITY
+
+    if out_fmt in ("jpeg", "jpg"):
+        if cropped.mode in ("RGBA", "LA", "P"):
+            cropped = cropped.convert("RGB")
+        if not out_path.endswith(".jpg") and not out_path.endswith(".jpeg"):
+            out_path = out_path.rsplit(".", 1)[0] + ".jpg" if "." in out_path else out_path + ".jpg"
+        cropped.save(out_path, "JPEG", quality=quality)
+    else:
+        cropped.save(out_path, "PNG")
+
+    cropped.close()
+
+    crop_w = x2 - x1
+    crop_h = y2 - y1
+    out_info = get_image_info(out_path)
+
+    result_json(True, {
+        "action": "crop",
+        "source": src_path,
+        "source_dimensions": {"w": img_w, "h": img_h},
+        "input_space": space,
+        "input_coords": {"x1": x1_in, "y1": y1_in, "x2": x2_in, "y2": y2_in},
+        "screenshot_coords": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+        "crop_dimensions": {"w": crop_w, "h": crop_h},
+        "coverage_pct": round(100.0 * crop_w * crop_h / (img_w * img_h), 1) if img_w * img_h else 0,
+        "output": out_info,
+        "tip": "Feed the output path to find_element/assert_visible by taking a screenshot first, then crop to focus region.",
+    })
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1757,6 +1883,21 @@ def main():
     p.add_argument("--scale", type=float, default=None,
                    help="Screenshot scale used by coordinates (auto-detected if omitted)")
 
+    # crop - Phase 10: Region-of-Interest crop
+    p = sub.add_parser("crop", help="[Phase 10] Crop a screenshot to a bounding box region")
+    p.add_argument("source", help="Path to source screenshot image")
+    p.add_argument("x1", type=float, help="Left edge of crop region")
+    p.add_argument("y1", type=float, help="Top edge of crop region")
+    p.add_argument("x2", type=float, help="Right edge of crop region")
+    p.add_argument("y2", type=float, help="Bottom edge of crop region")
+    p.add_argument("--space", choices=["screenshot", "native", "normalized"], default="screenshot",
+                   help="Coordinate space for x1/y1/x2/y2 (default: screenshot)")
+    p.add_argument("--out", default=None, help="Output path for cropped image (default: auto-temp)")
+    p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None,
+                   help="Output format (default: jpeg)")
+    p.add_argument("--quality", type=int, default=None,
+                   help="JPEG quality (default: 80)")
+
     # sessions - list/show named session registry
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
@@ -1787,6 +1928,7 @@ def main():
         "scroll": cmd_scroll,
         "drag": cmd_drag,
         "diff": cmd_diff,
+        "crop": cmd_crop,
     }[args.command](args, config)
 
 
