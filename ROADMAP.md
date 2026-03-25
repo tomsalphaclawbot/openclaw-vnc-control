@@ -101,6 +101,23 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - [x] Tagged v0.9.1
 - **Rationale:** Completes the read-back loop. Vision API extracts text from screenshots (slow + ~$0.01/call). Clipboard reads it for free. Workflow: `find_element` → `click` → `clipboard copy` → inspect text without another vision call.
 
+## Phase 15 — Workflow Runner ✅ DONE 2026-03-25
+- [x] `vnc-workflow.py` — YAML/JSON workflow engine; chains vnc-control commands into reusable automation scripts
+- [x] `vnc_workflow.py` — importable module alias for testing
+- [x] Step execution with retry logic (`retry_max`, `retry_delay`), `on_error: stop|continue|retry`
+- [x] Variable interpolation: `{{var_name}}`, `{{step_id.field}}`, `{{step_id.data.field}}` — cascading var lookup
+- [x] `save_output` — capture step result into named variable for downstream steps
+- [x] Dry-run mode (`--dry-run`) — validates + shows plan without executing
+- [x] Built-in commands: `sleep`, `echo` (no VNC required)
+- [x] `vnc-workflow validate FILE` — standalone validation without execution
+- [x] `vnc-workflow list` — discover workflow files in `workflows/` dir
+- [x] `--var KEY=VALUE` CLI overrides for workflow variables
+- [x] `--example` flag: run built-in demo workflow without a file path
+- [x] 42 unit tests (159/159 total suite passing, 4 skipped)
+- [x] Sample workflows: `workflows/screenshot-and-check.json`, `workflows/find-and-click.json`
+- [x] Tagged v1.1.0
+- **Rationale:** Enables agents to write automation workflows once and replay deterministically. Eliminates per-step round-trips. Foundation for multi-step GUI automation (login flows, dialog handling, form filling).
+
 ## Abandoned Approaches (documented for future reference)
 - **vncdotool threaded API**: `captureScreen` hangs on macOS ARD (framebuffer timeout)
 - **asyncvnc**: Screenshots all-black (encoding limitation)

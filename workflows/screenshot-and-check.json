@@ -1,0 +1,26 @@
+{
+  "name": "screenshot-and-check",
+  "description": "Take a screenshot, save it, and verify the file exists.",
+  "variables": {
+    "out_path": "/tmp/vnc-workflow-check.jpg"
+  },
+  "steps": [
+    {
+      "id": "log-start",
+      "command": "echo",
+      "args": ["Starting screenshot-and-check workflow"]
+    },
+    {
+      "id": "capture",
+      "command": "screenshot",
+      "args": ["--format", "jpeg", "--scale", "0.5", "--out", "{{out_path}}"],
+      "on_error": "stop",
+      "save_output": "capture_result"
+    },
+    {
+      "id": "log-done",
+      "command": "echo",
+      "args": ["Screenshot saved to {{out_path}}"]
+    }
+  ]
+}

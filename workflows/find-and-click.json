@@ -1,0 +1,27 @@
+{
+  "name": "find-and-click",
+  "description": "Find a UI element by description and click it. Requires VNC connection.",
+  "variables": {
+    "element_description": "close button"
+  },
+  "steps": [
+    {
+      "id": "find",
+      "command": "find_element",
+      "args": ["{{element_description}}"],
+      "on_error": "stop",
+      "save_output": "element"
+    },
+    {
+      "id": "click",
+      "command": "click",
+      "args": ["{{element.native_x}}", "{{element.native_y}}", "--space", "native"],
+      "on_error": "stop"
+    },
+    {
+      "id": "verify",
+      "command": "screenshot",
+      "args": ["--format", "jpeg", "--out", "/tmp/after-click.jpg"]
+    }
+  ]
+}
