@@ -2314,6 +2314,17 @@ def main():
     p.add_argument("--quality", type=int, default=None,
                    help="JPEG quality (default: 80)")
 
+    # clipboard - Phase 13: clipboard integration
+    p = sub.add_parser("clipboard", help="[Phase 13] Read/write/copy/paste clipboard contents (localhost targets)")
+    p.add_argument("clipboard_action", choices=["get", "set", "copy", "paste"],
+                   help="get: read clipboard | set: write to clipboard | "
+                        "copy: send Cmd/Ctrl+C and return clipboard | "
+                        "paste: set clipboard and send Cmd/Ctrl+V")
+    p.add_argument("--text", default=None,
+                   help="Text to write (required for 'set' and 'paste')")
+    p.add_argument("--delay", type=float, default=0.3,
+                   help="Seconds to wait after key send before reading clipboard (default: 0.3)")
+
     # sessions - list/show named session registry
     p = sub.add_parser("macro", help="[Phase 12] Record and replay VNC action macros")
     p.add_argument("subaction", choices=["record", "play", "list"],
@@ -2356,7 +2367,156 @@ def main():
         "crop": cmd_crop,
         "annotate": cmd_annotate,
         "macro": cmd_macro,
+        "clipboard": cmd_clipboard,
     }[args.command](args, config)
+
+
+def cmd_clipboard(args, config):
+    """Phase 13: Clipboard integration for localhost VNC targets.
+
+    Since VNC is to localhost (macOS), clipboard operations are performed
+    via native OS commands (pbcopy/pbpaste on macOS, xclip/xsel on Linux)
+    rather than through the VNC protocol itself.
+
+    Subactions:
+      get        — Read current clipboard contents (text)
+      set TEXT   — Write TEXT to clipboard
+      copy       — Send Cmd+C (macOS) or Ctrl+C (Linux) to focused element,
+                   then return clipboard contents
+      paste      — Set clipboard to --text value, then send Cmd+V / Ctrl+V
+
+    Options:
+      --text TEXT   — Text to set (for 'set' and 'paste')
+      --delay SECS  — Delay after key send before reading clipboard (default: 0.3)
+    """
+    import platform
+
+    subaction = args.clipboard_action
+    text = getattr(args, "text", None)
+    delay = getattr(args, "delay", 0.3)
+
+    # Detect OS clipboard commands
+    system = platform.system()
+    if system == "Darwin":
+        copy_key = "super_l-c"   # Cmd+C
+        paste_key = "super_l-v"  # Cmd+V
+        read_cmd = ["pbpaste"]
+        write_cmd_base = ["pbcopy"]
+    else:
+        # Linux fallback — require xclip
+        copy_key = "ctrl-c"
+        paste_key = "ctrl-v"
+        read_cmd = ["xclip", "-selection", "clipboard", "-o"]
+        write_cmd_base = ["xclip", "-selection", "clipboard"]
+
+    def _clipboard_read():
+        """Read from OS clipboard, return (ok, text, error)."""
+        try:
+            result = subprocess.run(
+                read_cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return True, result.stdout, None
+            return False, None, result.stderr.strip() or f"exit {result.returncode}"
+        except FileNotFoundError as e:
+            return False, None, f"clipboard tool not found: {e}"
+        except subprocess.TimeoutExpired:
+            return False, None, "clipboard read timed out"
+        except Exception as e:
+            return False, None, str(e)
+
+    def _clipboard_write(text_val):
+        """Write text_val to OS clipboard, return (ok, error)."""
+        try:
+            result = subprocess.run(
+                write_cmd_base,
+                input=text_val,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return True, None
+            return False, result.stderr.strip() or f"exit {result.returncode}"
+        except FileNotFoundError as e:
+            return False, f"clipboard tool not found: {e}"
+        except subprocess.TimeoutExpired:
+            return False, "clipboard write timed out"
+        except Exception as e:
+            return False, str(e)
+
+    if subaction == "get":
+        ok, content, err = _clipboard_read()
+        if not ok:
+            result_json(False, error=f"clipboard read failed: {err}")
+            return
+        result_json(True, {
+            "clipboard": content,
+            "length": len(content),
+            "lines": content.count("\n") + (1 if content else 0),
+        })
+
+    elif subaction == "set":
+        if text is None:
+            result_json(False, error="clipboard set requires --text")
+            return
+        ok, err = _clipboard_write(text)
+        if not ok:
+            result_json(False, error=f"clipboard write failed: {err}")
+            return
+        result_json(True, {
+            "clipboard_set": True,
+            "length": len(text),
+        })
+
+    elif subaction == "copy":
+        # Send copy key combo to focused element
+        ok, _, stderr, duration = run_vncdo(config, ["key", copy_key], timeout=5, timeout_ok=True)
+        if not ok:
+            result_json(False, error=f"key send failed: {stderr}")
+            return
+        # Small delay for clipboard to update
+        if delay > 0:
+            time.sleep(delay)
+        # Read clipboard
+        read_ok, content, err = _clipboard_read()
+        if not read_ok:
+            result_json(False, error=f"key sent but clipboard read failed: {err}")
+            return
+        result_json(True, {
+            "clipboard": content,
+            "length": len(content),
+            "lines": content.count("\n") + (1 if content else 0),
+            "key_sent": copy_key,
+            "key_duration_ms": round(duration * 1000),
+        })
+
+    elif subaction == "paste":
+        if text is None:
+            result_json(False, error="clipboard paste requires --text")
+            return
+        # Write text to clipboard first
+        write_ok, write_err = _clipboard_write(text)
+        if not write_ok:
+            result_json(False, error=f"clipboard write failed: {write_err}")
+            return
+        # Send paste key combo
+        ok, _, stderr, duration = run_vncdo(config, ["key", paste_key], timeout=5, timeout_ok=True)
+        if not ok:
+            result_json(False, error=f"clipboard set but key send failed: {stderr}")
+            return
+        result_json(True, {
+            "pasted": True,
+            "length": len(text),
+            "key_sent": paste_key,
+            "key_duration_ms": round(duration * 1000),
+        })
+
+    else:
+        result_json(False, error=f"Unknown clipboard subaction: {subaction}")
 
 
 def _cmd_sessions(args):

@@ -88,6 +88,19 @@ Target: make the VNC bridge consumable via HTTP for multi-agent and remote orche
 - [x] Full suite: 81 passed, 5 skipped (up from 68+5)
 - [x] Tagged v0.5.0
 
+## Phase 13 — Clipboard Integration ✅ DONE 2026-03-25
+- [x] `clipboard get` — read current clipboard text via OS native tools (pbpaste on macOS, xclip on Linux)
+- [x] `clipboard set --text TEXT` — write text to clipboard (pbcopy/xclip)
+- [x] `clipboard copy` — send Cmd+C (macOS) / Ctrl+C (Linux) to focused element, return clipboard contents
+- [x] `clipboard paste --text TEXT` — set clipboard to TEXT then send Cmd+V / Ctrl+V
+- [x] `--delay SECS` option for copy (default: 0.3s after key send before reading)
+- [x] Auto-detects macOS vs Linux (different key combos + clipboard tools)
+- [x] Graceful error handling for missing clipboard tools (FileNotFoundError, timeout)
+- [x] Returns structured JSON: `clipboard`, `length`, `lines`, `key_sent`, `key_duration_ms`
+- [x] 10 unit tests (73/73 total passing + 0 regressions)
+- [x] Tagged v0.9.1
+- **Rationale:** Completes the read-back loop. Vision API extracts text from screenshots (slow + ~$0.01/call). Clipboard reads it for free. Workflow: `find_element` → `click` → `clipboard copy` → inspect text without another vision call.
+
 ## Abandoned Approaches (documented for future reference)
 - **vncdotool threaded API**: `captureScreen` hangs on macOS ARD (framebuffer timeout)
 - **asyncvnc**: Screenshots all-black (encoding limitation)

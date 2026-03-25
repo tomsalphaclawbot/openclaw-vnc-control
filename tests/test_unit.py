@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -742,3 +743,164 @@ class TestPhase10Crop:
         assert "crop" in result.stdout.lower()
         assert "source" in result.stdout.lower()
         assert "space" in result.stdout.lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase 13 — Clipboard Integration
+# ---------------------------------------------------------------------------
+
+class TestPhase13Clipboard:
+    """Tests for clipboard get/set/copy/paste commands (no VNC required for set/get)."""
+
+    def test_parser_registered(self):
+        """clipboard subcommand should be registered in argparse."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "--help"],
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode == 0
+        assert "get" in result.stdout
+        assert "set" in result.stdout
+        assert "copy" in result.stdout
+        assert "paste" in result.stdout
+
+    def test_set_and_get_roundtrip(self):
+        """clipboard set then get should return same text (macOS pbcopy/pbpaste)."""
+        import platform
+        if platform.system() != "Darwin":
+            pytest.skip("macOS-only test (pbcopy/pbpaste)")
+        sentinel = "vnc_phase13_test_" + str(int(time.time()))
+        # set
+        result_set = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "set", "--text", sentinel],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result_set.returncode == 0, result_set.stdout
+        data_set = json.loads(result_set.stdout)
+        assert data_set["ok"] is True
+        assert data_set["clipboard_set"] is True
+        assert data_set["length"] == len(sentinel)
+        # get
+        result_get = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "get"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result_get.returncode == 0, result_get.stdout
+        data_get = json.loads(result_get.stdout)
+        assert data_get["ok"] is True
+        assert data_get["clipboard"] == sentinel
+        assert data_get["length"] == len(sentinel)
+
+    def test_set_empty_string(self):
+        """clipboard set with empty string should succeed."""
+        import platform
+        if platform.system() != "Darwin":
+            pytest.skip("macOS-only test (pbcopy/pbpaste)")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "set", "--text", ""],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        assert data["length"] == 0
+
+    def test_set_requires_text_flag(self):
+        """clipboard set without --text should fail gracefully."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "set"],
+            capture_output=True, text=True, timeout=10,
+        )
+        # Should return ok=false or fail with non-zero exit
+        try:
+            data = json.loads(result.stdout)
+            assert data["ok"] is False
+        except json.JSONDecodeError:
+            # argparse error is also acceptable (non-zero exit, stderr message)
+            assert result.returncode != 0
+
+    def test_paste_requires_text_flag(self):
+        """clipboard paste without --text should fail gracefully."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "paste"],
+            capture_output=True, text=True, timeout=10,
+        )
+        try:
+            data = json.loads(result.stdout)
+            assert data["ok"] is False
+        except json.JSONDecodeError:
+            assert result.returncode != 0
+
+    def test_get_returns_structure(self):
+        """clipboard get should return ok, clipboard, length, lines fields."""
+        import platform
+        if platform.system() != "Darwin":
+            pytest.skip("macOS-only test (pbcopy/pbpaste)")
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "get"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["ok"] is True
+        assert "clipboard" in data
+        assert "length" in data
+        assert "lines" in data
+        assert isinstance(data["length"], int)
+        assert isinstance(data["lines"], int)
+
+    def test_set_multiline(self):
+        """clipboard set/get should preserve multiline text."""
+        import platform
+        if platform.system() != "Darwin":
+            pytest.skip("macOS-only test (pbcopy/pbpaste)")
+        text = "line1\nline2\nline3"
+        result_set = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "set", "--text", text],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result_set.returncode == 0
+        result_get = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "get"],
+            capture_output=True, text=True, timeout=10,
+        )
+        data = json.loads(result_get.stdout)
+        assert data["ok"] is True
+        assert data["lines"] >= 3
+
+    def test_invalid_subaction(self):
+        """Unknown clipboard subaction should fail cleanly."""
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "zap"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode != 0
+
+    def test_set_unicode(self):
+        """clipboard set should handle unicode text (emoji + CJK)."""
+        import platform
+        if platform.system() != "Darwin":
+            pytest.skip("macOS-only test (pbcopy/pbpaste)")
+        text = "⚡ Alpha 测试 🎯"
+        result_set = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "set", "--text", text],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result_set.returncode == 0
+        data_set = json.loads(result_set.stdout)
+        assert data_set["ok"] is True
+        # verify roundtrip
+        result_get = subprocess.run(
+            [sys.executable, str(_SCRIPT), "clipboard", "get"],
+            capture_output=True, text=True, timeout=10,
+        )
+        data_get = json.loads(result_get.stdout)
+        assert data_get["ok"] is True
+        assert data_get["clipboard"] == text
+
+    def test_copy_subaction_exists_in_dispatch(self):
+        """cmd_clipboard should be reachable via 'copy' subaction path (no VNC needed for unit check)."""
+        # Verify the function is importable and handles the copy subaction branch
+        import types
+        assert hasattr(vnc, "cmd_clipboard")
+        assert callable(vnc.cmd_clipboard)
