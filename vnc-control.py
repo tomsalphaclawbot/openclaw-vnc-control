@@ -1314,50 +1314,34 @@ def cmd_find_element(args, config):
 
     img_info = get_image_info(tmp_img)
 
-    # Call vision model
-    vision_model = getattr(args, "model", None) or os.environ.get("VNC_VISION_MODEL", "claude-opus-4-5")
-    vision_result = _vision_find_element(tmp_img, args.description, model=vision_model)
+    # Use unified detection layer
+    backend_arg = getattr(args, "backend", "anthropic")  # find_element defaults to anthropic
+    detection = detect_element(tmp_img, args.description, backend=backend_arg,
+                               config=config, capture_scale=scale)
 
-    if not vision_result.get("found"):
+    if not detection.get("found"):
         result_json(False, {
             "action": "find_element",
             "description": args.description,
-            "found": False,
-            "model": vision_model,
-            "reasoning": vision_result.get("reasoning", "Element not found"),
-            "error": vision_result.get("error"),
+            "detection": detection,
             "screenshot": {"path": tmp_img, "w": img_info.get("width"), "h": img_info.get("height")},
         })
         return
 
-    x = vision_result.get("x")
-    y = vision_result.get("y")
-    confidence = vision_result.get("confidence", "unknown")
-    reasoning = vision_result.get("reasoning", "")
-    bbox = vision_result.get("bounding_box")
-
-    # Compute native coords for convenience
-    native_x, native_y = None, None
-    if x is not None and y is not None and scale and scale > 0:
-        native_x = int(x / scale)
-        native_y = int(y / scale)
+    cx = detection["center"]["x"]
+    cy = detection["center"]["y"]
+    native_x, native_y, native_w, native_h, _ = resolve_native_coords(
+        cx, cy, "screenshot", config, scale=scale
+    )
 
     result_json(True, {
         "action": "find_element",
         "description": args.description,
-        "found": True,
-        "x": x,
-        "y": y,
-        "native_x": native_x,
-        "native_y": native_y,
-        "confidence": confidence,
-        "reasoning": reasoning,
-        "bounding_box": bbox,
-        "model": vision_model,
-        "coordinate_space": "screenshot",
-        "screenshot_scale": scale,
+        "detection": detection,
+        "native_coords": {"x": native_x, "y": native_y},
+        "native_res": {"w": native_w, "h": native_h},
+        "capture_scale": scale,
         "screenshot": {"path": tmp_img, "w": img_info.get("width"), "h": img_info.get("height")},
-        "tip": "Use x,y with 'click' command (default screenshot space). Or use native_x,native_y with --space native.",
     })
 
 
@@ -1472,6 +1456,312 @@ def cmd_assert_visible(args, config):
 
     print(json.dumps(payload))
     sys.exit(0 if found else 1)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# UNIFIED DETECTION LAYER
+# All vision backends normalize to DetectionResult.
+# Callers only touch detect_element() — never call backend functions directly.
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Canonical DetectionResult schema:
+# {
+#   "found":       bool,
+#   "query":       str,
+#   "backend":     str,        # "moondream" | "gemma4" | "anthropic"
+#   "image_size":  [w, h],     # actual image dims fed to the model
+#   "box": {                   # bounding box in screenshot-space px
+#     "x_min": int, "y_min": int,
+#     "x_max": int, "y_max": int,
+#   },
+#   "box_norm": {              # normalized 0-1 (always included when found)
+#     "x_min": float, "y_min": float,
+#     "x_max": float, "y_max": float,
+#   },
+#   "center": {"x": int, "y": int},      # screenshot-space px
+#   "center_norm": {"x": float, "y": float},
+#   "confidence":  str,        # "high" | "medium" | "low"
+#   "note":        str,        # optional model reasoning
+#   "elapsed_s":   float,
+#   "error":       str,        # only when found=False due to error
+# }
+#
+# Native VNC coords are NOT included here.
+# Caller: resolve_native_coords(center.x, center.y, "screenshot", config, scale=capture_scale)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _make_detection_result(found, query, backend, image_size=None,
+                           box=None, confidence="low", note=None,
+                           elapsed_s=0.0, error=None, raw_extra=None):
+    """
+    Build a canonical DetectionResult dict. box = {x_min,y_min,x_max,y_max} in px.
+    Computes center and normalized fields automatically.
+    """
+    r = {
+        "found": found,
+        "query": query,
+        "backend": backend,
+        "elapsed_s": round(elapsed_s, 3),
+    }
+    if image_size:
+        r["image_size"] = list(image_size)
+    if not found:
+        if error:
+            r["error"] = error
+        if note:
+            r["note"] = note
+        return r
+
+    w, h = image_size
+    xmin, ymin, xmax, ymax = (int(round(box["x_min"])), int(round(box["y_min"])),
+                               int(round(box["x_max"])), int(round(box["y_max"])))
+    cx = (xmin + xmax) // 2
+    cy = (ymin + ymax) // 2
+    r.update({
+        "box":  {"x_min": xmin, "y_min": ymin, "x_max": xmax, "y_max": ymax},
+        "box_norm": {
+            "x_min": round(xmin / w, 6), "y_min": round(ymin / h, 6),
+            "x_max": round(xmax / w, 6), "y_max": round(ymax / h, 6),
+        },
+        "center":      {"x": cx, "y": cy},
+        "center_norm": {"x": round(cx / w, 6), "y": round(cy / h, 6)},
+        "confidence":  confidence,
+    })
+    if note:
+        r["note"] = note
+    if raw_extra:
+        r["_raw"] = raw_extra
+    return r
+
+
+def detect_element(image_path, query, backend="moondream", config=None, capture_scale=None):
+    """
+    UNIFIED entry point for element detection across all vision backends.
+
+    Args:
+        image_path:    path to the screenshot (must be the EXACT image the model will see)
+        query:         natural language description of the element
+        backend:       "moondream" | "gemma4" | "anthropic"
+        config:        VNC config dict (used if native coord conversion is needed by caller)
+        capture_scale: scale used to produce image_path from native resolution
+                       (stored in result for caller to use with resolve_native_coords)
+
+    Returns DetectionResult (canonical schema above).
+    Caller converts center to native: resolve_native_coords(r["center"]["x"], r["center"]["y"],
+                                          "screenshot", config, scale=capture_scale)
+    """
+    result = None
+    if backend == "gemma4":
+        result = _detect_gemma4(image_path, query)
+    elif backend == "anthropic":
+        result = _detect_anthropic(image_path, query)
+    else:
+        result = _detect_moondream(image_path, query)
+
+    if capture_scale is not None:
+        result["capture_scale"] = capture_scale
+    return result
+
+
+# ─── Backend implementations — all return canonical DetectionResult ──────────────────
+
+def _detect_moondream(image_path, query):
+    """Moondream2 local inference (MPS/CPU). Purpose-built grounding API."""
+    try:
+        from PIL import Image
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        import torch, time
+    except ImportError as e:
+        return _make_detection_result(False, query, "moondream",
+                                      error=f"Missing dep: {e}")
+
+    global _moondream_model_cache
+    MODEL_ID = "vikhyatk/moondream2"
+    REVISION = "2025-06-21"
+    t_load = 0.0
+    if _moondream_model_cache is None:
+        t0 = time.time()
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=REVISION,
+                                                  trust_remote_code=True)
+        device = ("mps" if getattr(torch.backends, "mps", None)
+                  and torch.backends.mps.is_available() else "cpu")
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_ID, revision=REVISION, trust_remote_code=True,
+            torch_dtype=torch.float16, low_cpu_mem_usage=True,
+        ).to(device).eval()
+        _moondream_model_cache = (model, tokenizer)
+        t_load = time.time() - t0
+
+    model, tokenizer = _moondream_model_cache
+    img = Image.open(image_path).convert("RGB")
+    w, h = img.size
+
+    t0 = time.time()
+    try:
+        enc = model.encode_image(img)
+        objects = model.detect(enc, query)["objects"]
+    except Exception as e:
+        return _make_detection_result(False, query, "moondream",
+                                      image_size=(w, h), error=str(e),
+                                      elapsed_s=time.time() - t0)
+    elapsed = time.time() - t0
+
+    if not objects:
+        return _make_detection_result(False, query, "moondream",
+                                      image_size=(w, h), elapsed_s=elapsed)
+
+    b = objects[0]
+    box = {
+        "x_min": b["x_min"] * w, "y_min": b["y_min"] * h,
+        "x_max": b["x_max"] * w, "y_max": b["y_max"] * h,
+    }
+    return _make_detection_result(True, query, "moondream",
+                                  image_size=(w, h), box=box, confidence="high",
+                                  elapsed_s=elapsed + t_load)
+
+
+def _detect_gemma4(image_path, query, model_id=None):
+    """Gemma4 local server (OpenAI-compatible on port 8890). Better reasoning, normalized output."""
+    import base64 as _b64, json as _json, time, urllib.request
+    from pathlib import Path as _Path
+    from PIL import Image as _Image
+
+    model_id = model_id or GEMMA4_MODEL
+    suffix = _Path(image_path).suffix.lower()
+    mime = "image/jpeg" if suffix in (".jpg", ".jpeg") else "image/png"
+    with open(image_path, "rb") as f:
+        img_b64 = _b64.b64encode(f.read()).decode()
+    img = _Image.open(image_path)
+    w, h = img.size
+
+    prompt = (
+        f'Locate "{query}" in this screenshot. '
+        'Return ONLY JSON: {"found":true,"x_min":<0-1>,"y_min":<0-1>,"x_max":<0-1>,"y_max":<0-1>,'
+        '"confidence":"high"|"medium"|"low","note":"<optional>"}  '
+        'or {"found":false,"note":"<why>"}. No other text.'
+    )
+    payload = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}},
+            {"type": "text", "text": prompt},
+        ]}],
+        "max_tokens": 150, "temperature": 0.0,
+    }
+    t0 = time.time()
+    req = urllib.request.Request(
+        f"{GEMMA4_ENDPOINT}/v1/chat/completions",
+        data=_json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": "vnc-control/1.0"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = _json.loads(resp.read())
+    except Exception as e:
+        return _make_detection_result(False, query, "gemma4",
+                                      image_size=(w, h), error=str(e),
+                                      elapsed_s=time.time() - t0)
+    elapsed = time.time() - t0
+    raw = body["choices"][0]["message"]["content"].strip()
+    try:
+        text = raw
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"): text = text[4:]
+        parsed = _json.loads(text.strip())
+    except _json.JSONDecodeError:
+        return _make_detection_result(False, query, "gemma4",
+                                      image_size=(w, h), elapsed_s=elapsed,
+                                      error="JSON parse failed", raw_extra=raw[:300])
+
+    if not parsed.get("found"):
+        return _make_detection_result(False, query, "gemma4",
+                                      image_size=(w, h), elapsed_s=elapsed,
+                                      note=parsed.get("note"))
+    # Gemma returns normalized 0-1 — convert to px
+    box = {
+        "x_min": parsed["x_min"] * w, "y_min": parsed["y_min"] * h,
+        "x_max": parsed["x_max"] * w, "y_max": parsed["y_max"] * h,
+    }
+    return _make_detection_result(True, query, "gemma4",
+                                  image_size=(w, h), box=box,
+                                  confidence=parsed.get("confidence", "medium"),
+                                  note=parsed.get("note"), elapsed_s=elapsed)
+
+
+def _detect_anthropic(image_path, query, model_id=None):
+    """Anthropic vision API. Best reasoning quality; has API cost."""
+    import base64 as _b64, json as _json, time, urllib.request
+    from PIL import Image as _Image
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return _make_detection_result(False, query, "anthropic",
+                                      error="ANTHROPIC_API_KEY not set")
+    model_id = model_id or "claude-opus-4-5"
+    with open(image_path, "rb") as f:
+        img_b64 = _b64.b64encode(f.read()).decode()
+    ext = Path(image_path).suffix.lower()
+    mime = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
+    img = _Image.open(image_path)
+    w, h = img.size
+
+    prompt = (
+        f"Find: \"{query}\"\n\n"
+        "Return ONLY JSON with these exact fields:\n"
+        '{"found":bool, "x_min":int, "y_min":int, "x_max":int, "y_max":int, '
+        '"confidence":"high"|"medium"|"low", "note":"one sentence"}\n'
+        f"All coordinates are pixel positions in this {w}x{h} image. "
+        "If not found: {\"found\":false, \"note\":\"why\"}\nNo markdown, no extra text."
+    )
+    payload = {
+        "model": model_id, "max_tokens": 256,
+        "messages": [{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64",
+                                          "media_type": mime, "data": img_b64}},
+            {"type": "text", "text": prompt},
+        ]}],
+    }
+    t0 = time.time()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=_json.dumps(payload).encode(),
+        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = _json.loads(resp.read())
+    except Exception as e:
+        return _make_detection_result(False, query, "anthropic",
+                                      image_size=(w, h), error=str(e),
+                                      elapsed_s=time.time() - t0)
+    elapsed = time.time() - t0
+    try:
+        text = result["content"][0]["text"].strip()
+        if text.startswith("```"):
+            text = "\n".join(text.split("\n")[1:])
+            if text.endswith("```"): text = text[:text.rfind("```")].strip()
+        parsed = _json.loads(text)
+    except Exception as e:
+        raw = result.get("content", [{}])[0].get("text", "")
+        return _make_detection_result(False, query, "anthropic",
+                                      image_size=(w, h), elapsed_s=elapsed,
+                                      error=f"Parse failed: {e}", raw_extra=raw[:300])
+
+    if not parsed.get("found"):
+        return _make_detection_result(False, query, "anthropic",
+                                      image_size=(w, h), elapsed_s=elapsed,
+                                      note=parsed.get("note"))
+    box = {
+        "x_min": parsed["x_min"], "y_min": parsed["y_min"],
+        "x_max": parsed["x_max"], "y_max": parsed["y_max"],
+    }
+    return _make_detection_result(True, query, "anthropic",
+                                  image_size=(w, h), box=box,
+                                  confidence=parsed.get("confidence", "medium"),
+                                  note=parsed.get("note"), elapsed_s=elapsed)
 
 
 # ─── Phase 8b: Local Vision — Moondream2 + Gemma4 click_element ────────────
@@ -1644,36 +1934,32 @@ def cmd_click_element(args, config):
         return
     tmp_img = convert_screenshot(raw_png, tmp_img, fmt="jpeg", scale=capture_scale, quality=quality)
 
-    # 2. Detect element — choose backend
+    # 2. Detect element using unified detection layer
     backend = getattr(args, "backend", "moondream")
-    detection = None
-    if backend == "gemma4":
-        detection = _gemma4_detect(tmp_img, description)
-        method = "gemma4_local"
-    else:  # default: moondream
-        detection = _moondream_detect(tmp_img, description)
-        method = "moondream2_local"
+    detection = detect_element(tmp_img, description, backend=backend,
+                               config=config, capture_scale=capture_scale)
 
     if not detection.get("found"):
-        # Fallback: remote vision API
-        vision_model = os.environ.get("VNC_VISION_MODEL", "claude-opus-4-5")
-        fallback = _vision_find_element(tmp_img, description, model=vision_model)
-        if not fallback.get("found"):
-            result_json(False, error="Element not found locally or via remote API",
+        # Fallback: try anthropic if we used a local backend
+        if backend != "anthropic":
+            fallback = detect_element(tmp_img, description, backend="anthropic",
+                                      config=config, capture_scale=capture_scale)
+            if not fallback.get("found"):
+                result_json(False, error="Element not found by any backend",
+                            data={"action": "click_element", "description": description,
+                                  "primary": detection, "fallback": fallback})
+                return
+            detection = fallback
+        else:
+            result_json(False, error="Element not found",
                         data={"action": "click_element", "description": description,
-                              "local_detection": detection})
+                              "detection": detection})
             return
-        cx = fallback["x"]
-        cy = fallback["y"]
-        method = "remote_vision_fallback"
-        detection_info = fallback
-    else:
-        cx = detection["center_px"]["x"]
-        cy = detection["center_px"]["y"]
-        detection_info = detection
 
-    # 3. Convert screenshot-space coords to native using the recorded capture_scale.
-    #    This is the critical step: model coords are in screenshot-space, VNC needs native.
+    # 3. Convert screenshot-space center to native VNC coords.
+    #    capture_scale is recorded in detection by detect_element().
+    cx = detection["center"]["x"]
+    cy = detection["center"]["y"]
     native_x, native_y, native_w, native_h, _ = resolve_native_coords(
         cx, cy, "screenshot", config, scale=capture_scale
     )
@@ -1690,8 +1976,7 @@ def cmd_click_element(args, config):
                 data={
                     "action": "click_element",
                     "description": description,
-                    "method": method,
-                    "detection": detection_info,
+                    "detection": detection,
                     "click_coords": {"x": cx, "y": cy, "space": "screenshot"},
                     "capture_scale": capture_scale,
                     "native_res": {"w": native_w, "h": native_h},
