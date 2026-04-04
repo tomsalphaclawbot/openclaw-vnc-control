@@ -1197,99 +1197,6 @@ def cmd_connect(args, config):
 
 # ─── Phase 7: Vision-Assisted Automation ─────────────────────────────────────
 
-def _vision_find_element(image_path, description, model=None):
-    """
-    Call Anthropic vision API to locate a UI element described in natural language.
-    Returns dict with: found (bool), x (float), y (float), confidence (str),
-    reasoning (str), bounding_box (dict with x1,y1,x2,y2 or None).
-
-    Coordinates are in SCREENSHOT space (pixels in the captured image).
-    """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return {"found": False, "error": "ANTHROPIC_API_KEY not set in env"}
-
-    # Read + encode image
-    with open(image_path, "rb") as f:
-        img_bytes = f.read()
-    img_b64 = base64.b64encode(img_bytes).decode()
-
-    # Detect media type
-    ext = Path(image_path).suffix.lower()
-    media_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
-
-    used_model = model or "claude-opus-4-5"
-
-    prompt = (
-        "You are a precise UI element locator. Your task is to find a specific UI element "
-        "in this screenshot and return its center coordinates.\n\n"
-        f"ELEMENT TO FIND: {description}\n\n"
-        "Respond ONLY with a JSON object (no markdown, no explanation outside JSON) with these fields:\n"
-        "- found: boolean — true if element is visible, false if not\n"
-        "- x: float — center x pixel coordinate in the screenshot (null if not found)\n"
-        "- y: float — center y pixel coordinate in the screenshot (null if not found)\n"
-        "- confidence: string — 'high', 'medium', or 'low'\n"
-        "- reasoning: string — one sentence explaining what you found and where\n"
-        "- bounding_box: object with x1,y1,x2,y2 pixel coords, or null if not found\n\n"
-        "Be precise. Use actual pixel coordinates from the image."
-    )
-
-    payload = {
-        "model": used_model,
-        "max_tokens": 512,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": img_b64,
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": prompt,
-                    },
-                ],
-            }
-        ],
-    }
-
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=data,
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read())
-    except Exception as e:
-        return {"found": False, "error": f"Vision API call failed: {e}"}
-
-    # Extract text content from response
-    try:
-        text = result["content"][0]["text"].strip()
-        # Strip markdown code fences if present
-        if text.startswith("```"):
-            text = "\n".join(text.split("\n")[1:])
-            if text.endswith("```"):
-                text = text[: text.rfind("```")].strip()
-        parsed = json.loads(text)
-        return parsed
-    except Exception as e:
-        raw_text = result.get("content", [{}])[0].get("text", "")
-        return {"found": False, "error": f"Vision response parse failed: {e}", "raw": raw_text}
-
-
 def cmd_find_element(args, config):
     """
     Phase 7: find_element — locate a UI element using vision model.
@@ -1354,7 +1261,7 @@ def cmd_wait_for(args, config):
     profile, fmt, scale, quality = capture_settings(args)
     timeout_s = getattr(args, "timeout", 30)
     interval_s = getattr(args, "interval", 2.0)
-    vision_model = getattr(args, "model", None) or os.environ.get("VNC_VISION_MODEL", "claude-opus-4-5")
+    backend_arg = getattr(args, "backend", "anthropic")
 
     start = time.time()
     attempt = 0
@@ -1384,25 +1291,22 @@ def cmd_wait_for(args, config):
             else:
                 tmp_img = raw_png
 
-            vision_result = _vision_find_element(tmp_img, args.description, model=vision_model)
-            if vision_result.get("found"):
-                x = vision_result.get("x")
-                y = vision_result.get("y")
-                native_x = int(x / scale) if (x is not None and scale and scale > 0) else None
-                native_y = int(y / scale) if (y is not None and scale and scale > 0) else None
+            detection = detect_element(tmp_img, args.description, backend=backend_arg,
+                                         config=config, capture_scale=scale)
+            if detection.get("found"):
+                cx = detection["center"]["x"]
+                cy = detection["center"]["y"]
+                native_x, native_y, native_w, native_h, _ = resolve_native_coords(
+                    cx, cy, "screenshot", config, scale=scale
+                )
                 result_json(True, {
                     "action": "wait_for",
                     "description": args.description,
                     "found": True,
                     "elapsed_s": round(time.time() - start, 2),
                     "attempts": attempt,
-                    "x": x,
-                    "y": y,
-                    "native_x": native_x,
-                    "native_y": native_y,
-                    "confidence": vision_result.get("confidence"),
-                    "reasoning": vision_result.get("reasoning"),
-                    "model": vision_model,
+                    "detection": detection,
+                    "native_coords": {"x": native_x, "y": native_y},
                     "screenshot": tmp_img,
                 })
                 return
@@ -1420,7 +1324,7 @@ def cmd_assert_visible(args, config):
     Single screenshot + vision check. Exits 0 if found, 1 if not found.
     """
     profile, fmt, scale, quality = capture_settings(args)
-    vision_model = getattr(args, "model", None) or os.environ.get("VNC_VISION_MODEL", "claude-opus-4-5")
+    backend_arg = getattr(args, "backend", "anthropic")
 
     tmp_img = tmpfile("assert-visible", "jpg" if fmt in ("jpeg", "jpg") else "png")
     raw_png = tmpfile(".raw-av", "png")
@@ -1436,23 +1340,20 @@ def cmd_assert_visible(args, config):
     else:
         tmp_img = raw_png
 
-    vision_result = _vision_find_element(tmp_img, args.description, model=vision_model)
-    found = bool(vision_result.get("found"))
+    detection = detect_element(tmp_img, args.description, backend=backend_arg,
+                               config=config, capture_scale=scale)
+    found = detection.get("found", False)
 
     payload = {
         "ok": found,
         "action": "assert_visible",
         "description": args.description,
         "visible": found,
-        "confidence": vision_result.get("confidence"),
-        "reasoning": vision_result.get("reasoning"),
-        "x": vision_result.get("x"),
-        "y": vision_result.get("y"),
-        "model": vision_model,
+        "detection": detection,
         "screenshot": tmp_img,
     }
     if not found:
-        payload["error"] = vision_result.get("error") or "Element not visible in current screenshot"
+        payload["error"] = detection.get("error") or "Element not visible in current screenshot"
 
     print(json.dumps(payload))
     sys.exit(0 if found else 1)
@@ -1768,138 +1669,6 @@ def _detect_anthropic(image_path, query, model_id=None):
 
 GEMMA4_ENDPOINT = os.environ.get("GEMMA4_ENDPOINT", "http://127.0.0.1:8890")
 GEMMA4_MODEL = "mlx-community/gemma-4-26b-a4b-it-4bit"
-
-_GEMMA4_DETECTION_PROMPT = '''Look at this screenshot of a macOS desktop. Locate: "{query}"
-
-If visible, return ONLY this JSON:
-{{"found":true,"x_min":<0-1>,"y_min":<0-1>,"x_max":<0-1>,"y_max":<0-1>,"confidence":"high"|"medium"|"low","note":"<optional>"}}
-
-If not visible: {{"found":false,"note":"<why>"}}
-
-Return only the JSON.'''
-
-def _gemma4_detect(image_path, query, model=None):
-    """
-    Run element detection via local Gemma4 server (port 8890, OpenAI-compatible).
-    Better reasoning than Moondream2, similar latency (~5-8s). No API cost.
-    Returns same format as _moondream_detect.
-    """
-    import base64, json as _json, time, urllib.request
-    from pathlib import Path as _Path
-    model = model or GEMMA4_MODEL
-    suffix = _Path(image_path).suffix.lower()
-    mime = "image/jpeg" if suffix in (".jpg", ".jpeg") else "image/png"
-    with open(image_path, "rb") as f:
-        img_b64 = base64.b64encode(f.read()).decode()
-
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": [
-            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}},
-            {"type": "text", "text": _GEMMA4_DETECTION_PROMPT.format(query=query)},
-        ]}],
-        "max_tokens": 200, "temperature": 0.0,
-    }
-    t0 = time.time()
-    req = urllib.request.Request(
-        f"{GEMMA4_ENDPOINT}/v1/chat/completions",
-        data=_json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "User-Agent": "vnc-control/1.0"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            body = _json.loads(resp.read())
-    except Exception as e:
-        return {"found": False, "error": str(e), "elapsed_s": round(time.time() - t0, 2)}
-    elapsed = time.time() - t0
-    raw = body["choices"][0]["message"]["content"].strip()
-    try:
-        text = raw
-        if "```" in text:
-            text = text.split("```")[1]
-            if text.startswith("json"): text = text[4:]
-        result = _json.loads(text.strip())
-    except _json.JSONDecodeError:
-        return {"found": False, "error": "JSON parse failed", "raw": raw[:300], "elapsed_s": round(elapsed, 2)}
-    result["elapsed_s"] = round(elapsed, 2)
-    result["backend"] = "gemma4"
-    if result.get("found"):
-        from PIL import Image as _Image
-        w, h = _Image.open(image_path).size
-        x0, y0 = result["x_min"] * w, result["y_min"] * h
-        x1, y1 = result["x_max"] * w, result["y_max"] * h
-        result["image_size"] = [w, h]
-        result["box_px"] = {"x_min": round(x0), "y_min": round(y0), "x_max": round(x1), "y_max": round(y1)}
-        result["center_px"] = {"x": round((x0 + x1) / 2), "y": round((y0 + y1) / 2)}
-    return result
-
-_moondream_model_cache = None  # (model, tokenizer) cached across calls
-
-def _moondream_detect(image_path, query):
-    """
-    Run Moondream2 locally (MPS/CPU) to detect a UI element.
-    Returns dict: {found, center_px: {x,y}, box_px: {x_min,y_min,x_max,y_max}, elapsed_s}
-    Model is cached in-process after first load (~8s warmup, ~4s subsequent).
-    """
-    global _moondream_model_cache
-    try:
-        from PIL import Image
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        import torch, time
-    except ImportError as e:
-        return {"found": False, "error": f"Missing dependency: {e}. Install: pip install transformers torch pillow"}
-
-    MODEL_ID = "vikhyatk/moondream2"
-    REVISION = "2025-06-21"
-    VENV_PYTHON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "..", "..", ".venvs", "moondream")
-    # If running outside the moondream venv, try to load from it
-    if _moondream_model_cache is None:
-        t0 = time.time()
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=REVISION, trust_remote_code=True)
-        device = "mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu"
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_ID, revision=REVISION, trust_remote_code=True,
-            torch_dtype=torch.float16, low_cpu_mem_usage=True,
-        ).to(device).eval()
-        _moondream_model_cache = (model, tokenizer)
-        load_time = time.time() - t0
-    else:
-        load_time = 0
-
-    model, tokenizer = _moondream_model_cache
-    img = Image.open(image_path).convert("RGB")
-    w, h = img.size
-
-    import time
-    t0 = time.time()
-    try:
-        enc = model.encode_image(img)
-        objects = model.detect(enc, query)["objects"]
-    except Exception as e:
-        return {"found": False, "error": str(e)}
-    elapsed = time.time() - t0
-
-    if not objects:
-        return {"found": False, "query": query, "elapsed_s": round(elapsed, 2), "load_s": round(load_time, 2)}
-
-    box = objects[0]
-    x_min = box["x_min"] * w
-    y_min = box["y_min"] * h
-    x_max = box["x_max"] * w
-    y_max = box["y_max"] * h
-    cx = (x_min + x_max) / 2
-    cy = (y_min + y_max) / 2
-    return {
-        "found": True, "query": query,
-        "elapsed_s": round(elapsed, 2), "load_s": round(load_time, 2),
-        "image_size": [w, h],
-        "box_px": {"x_min": round(x_min), "y_min": round(y_min),
-                   "x_max": round(x_max), "y_max": round(y_max)},
-        "center_px": {"x": round(cx), "y": round(cy)},
-    }
-
 
 def cmd_click_element(args, config):
     """

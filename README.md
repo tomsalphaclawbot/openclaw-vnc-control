@@ -330,9 +330,24 @@ python3 scripts/click-calibrator.py \
 
 This writes `state/click-calibration.json` with affine correction coefficients and fit-error stats.
 
+## History
+
+See [CHANGELOG.md](./CHANGELOG.md) for the full version history.
+
+| Version | Highlights |
+|---------|------------|
+| **0.5.0** | Unified `detect_element()` layer · canonical `DetectionResult` schema · `click_element` command · Moondream2 + Gemma4 local vision backends · multi-backend `--backend` flag |
+| **0.4.0** | Workflow engine (YAML/JSON, retry, hooks) · OCR · clipboard · macro record/play · annotation · image diff · scroll/drag · vision-assisted `find_element` / `wait_for` / `assert_visible` |
+| **0.3.0** | Multi-session support · HTTP API server (FastAPI) |
+| **0.2.0** | Session daemon · Click Lab (22/22 accuracy) · lock screen detection · coordinate spaces · `normalize_key_name()` |
+| **0.1.0** | Core CLI (screenshot/click/type/key) · AgentSkill · macOS ARD support · AI efficiency profile |
+
 ## Docs
 
+- [DESIGN.md](./DESIGN.md) — open-source architecture, permission model, multi-agent deployment guide
+- [CHANGELOG.md](./CHANGELOG.md) — full version history
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — design decisions and component model
 - [ROADMAP.md](./ROADMAP.md) — phased delivery plan
 - [TASKS.md](./TASKS.md) — current sprint status and known issues
+- [docs/vision-models.md](./docs/vision-models.md) — per-model latency, accuracy, trade-off comparison
 - [docs/VNC_CLICK_LAB.md](./docs/VNC_CLICK_LAB.md) — standalone lab runbook, telemetry schema, and regression intent
