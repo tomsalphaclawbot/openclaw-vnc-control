@@ -426,6 +426,89 @@ def list_dialog_buttons():
         return []
 
 
+def detect_chrome_remote_debug_dialog():
+    """Detect Chrome's "Allow remote debugging?" dialog via AX tree."""
+    script = '''
+    tell application "System Events"
+      if not (exists process "Google Chrome") then return "NO_CHROME"
+      tell process "Google Chrome"
+        if not (exists window 1) then return "NO_WINDOW"
+        set hasPrompt to false
+        set buttonsFound to ""
+        try
+          set elems to entire contents of window 1
+          repeat with e in elems
+            try
+              set n to name of e as text
+              if n contains "Allow remote debugging?" then
+                set hasPrompt to true
+              end if
+            end try
+            try
+              if role of e is "AXButton" then
+                set d to description of e as text
+                if d is "Allow" or d is "Cancel" or d is "Turn off in settings" then
+                  if buttonsFound is not "" then set buttonsFound to buttonsFound & "|||"
+                  set buttonsFound to buttonsFound & d
+                end if
+              end if
+            end try
+          end repeat
+        end try
+        if hasPrompt then
+          return "FOUND|" & buttonsFound
+        end if
+      end tell
+    end tell
+    return "NOT_FOUND"
+    '''
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
+        output = result.stdout.strip()
+        if output.startswith("FOUND|"):
+            raw = output.split("|", 1)[1] if "|" in output else ""
+            buttons = [b.strip() for b in raw.split("|||") if b.strip()]
+            return {"visible": True, "buttons": buttons, "process": "Google Chrome"}
+        return None
+    except Exception:
+        return None
+
+
+def dismiss_chrome_remote_debug_dialog(button_name="Allow"):
+    """Press a button on Chrome's "Allow remote debugging?" dialog via AXPress."""
+    script = f'''
+    tell application "System Events"
+      if not (exists process "Google Chrome") then return "ERROR:Chrome not running"
+      tell process "Google Chrome"
+        if not (exists window 1) then return "ERROR:No Chrome window"
+        set elems to entire contents of window 1
+        repeat with e in elems
+          try
+            if role of e is "AXButton" then
+              set d to description of e as text
+              if d is "{button_name}" then
+                perform action "AXPress" of e
+                return "CLICKED"
+              end if
+            end if
+          end try
+        end repeat
+      end tell
+    end tell
+    return "ERROR:Button not found"
+    '''
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
+        output = result.stdout.strip()
+        if output == "CLICKED":
+            return True, f"Clicked '{button_name}' via Chrome AXPress"
+        return False, output.replace("ERROR:", "").strip() if output else "Unknown AppleScript result"
+    except subprocess.TimeoutExpired:
+        return False, "AppleScript timed out"
+    except Exception as e:
+        return False, str(e)
+
+
 def normalize_key_name(key: str) -> str:
     """Normalize key aliases for better macOS ARD compatibility.
 
@@ -680,6 +763,7 @@ def cmd_click(args, config):
 
     # Check for system dialog BEFORE clicking
     dialog_before = detect_system_dialog()
+    chrome_dialog_before = detect_chrome_remote_debug_dialog()
 
     actions = ["move", str(nx), str(ny), "pause", "0.1", "click", button]
     if args.double:
@@ -767,6 +851,27 @@ def cmd_click(args, config):
     if dialog_fallback:
         data["system_dialog_fallback"] = dialog_fallback
 
+    # Chrome-specific fallback: "Allow remote debugging?" dialog can ignore VNC clicks.
+    chrome_dialog_fallback = None
+    if chrome_dialog_before and chrome_dialog_before.get("visible"):
+        time.sleep(0.2)
+        chrome_dialog_after = detect_chrome_remote_debug_dialog()
+        if chrome_dialog_after and chrome_dialog_after.get("visible"):
+            target_button = getattr(args, "dialog_button", None) or "Allow"
+            fallback_ok, fallback_msg = dismiss_chrome_remote_debug_dialog(target_button)
+            chrome_dialog_fallback = {
+                "triggered": True,
+                "reason": "VNC click did not dismiss Chrome remote-debugging dialog; used AXPress fallback",
+                "button_clicked": target_button,
+                "method": "AppleScript accessibility API (Google Chrome AXButton description)",
+                "success": fallback_ok,
+                "message": fallback_msg,
+                "dialog_info": chrome_dialog_after,
+            }
+
+    if chrome_dialog_fallback:
+        data["chrome_dialog_fallback"] = chrome_dialog_fallback
+
     if os.path.exists(verify_png):
         # Convert verify screenshot using active profile defaults
         _, fmt, default_scale, quality = capture_settings(args, prefer_last_scale=True)
@@ -776,7 +881,10 @@ def cmd_click(args, config):
         data["verify_image"] = get_image_info(out)
         data["profile"] = profile
 
-    if ok or (dialog_fallback and dialog_fallback.get("success")):
+    click_success = ok or (dialog_fallback and dialog_fallback.get("success")) or (
+        chrome_dialog_fallback and chrome_dialog_fallback.get("success")
+    )
+    if click_success:
         result_json(True, data)
     else:
         # Still return data even on failure (verify image might exist from partial run)
@@ -1364,6 +1472,142 @@ def cmd_assert_visible(args, config):
 
     print(json.dumps(payload))
     sys.exit(0 if found else 1)
+
+
+# ─── Phase 8b: Local Vision — Moondream2 click_element ──────────────────────
+
+_moondream_model_cache = None  # (model, tokenizer) cached across calls
+
+def _moondream_detect(image_path, query):
+    """
+    Run Moondream2 locally (MPS/CPU) to detect a UI element.
+    Returns dict: {found, center_px: {x,y}, box_px: {x_min,y_min,x_max,y_max}, elapsed_s}
+    Model is cached in-process after first load (~8s warmup, ~4s subsequent).
+    """
+    global _moondream_model_cache
+    try:
+        from PIL import Image
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        import torch, time
+    except ImportError as e:
+        return {"found": False, "error": f"Missing dependency: {e}. Install: pip install transformers torch pillow"}
+
+    MODEL_ID = "vikhyatk/moondream2"
+    REVISION = "2025-06-21"
+    VENV_PYTHON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "..", "..", ".venvs", "moondream")
+    # If running outside the moondream venv, try to load from it
+    if _moondream_model_cache is None:
+        t0 = time.time()
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=REVISION, trust_remote_code=True)
+        device = "mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu"
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_ID, revision=REVISION, trust_remote_code=True,
+            torch_dtype=torch.float16, low_cpu_mem_usage=True,
+        ).to(device).eval()
+        _moondream_model_cache = (model, tokenizer)
+        load_time = time.time() - t0
+    else:
+        load_time = 0
+
+    model, tokenizer = _moondream_model_cache
+    img = Image.open(image_path).convert("RGB")
+    w, h = img.size
+
+    import time
+    t0 = time.time()
+    try:
+        enc = model.encode_image(img)
+        objects = model.detect(enc, query)["objects"]
+    except Exception as e:
+        return {"found": False, "error": str(e)}
+    elapsed = time.time() - t0
+
+    if not objects:
+        return {"found": False, "query": query, "elapsed_s": round(elapsed, 2), "load_s": round(load_time, 2)}
+
+    box = objects[0]
+    x_min = box["x_min"] * w
+    y_min = box["y_min"] * h
+    x_max = box["x_max"] * w
+    y_max = box["y_max"] * h
+    cx = (x_min + x_max) / 2
+    cy = (y_min + y_max) / 2
+    return {
+        "found": True, "query": query,
+        "elapsed_s": round(elapsed, 2), "load_s": round(load_time, 2),
+        "image_size": [w, h],
+        "box_px": {"x_min": round(x_min), "y_min": round(y_min),
+                   "x_max": round(x_max), "y_max": round(y_max)},
+        "center_px": {"x": round(cx), "y": round(cy)},
+    }
+
+
+def cmd_click_element(args, config):
+    """
+    Phase 8b: click_element — find a UI element by natural language, click its center.
+    Uses Moondream2 locally (no API call, ~4-8s). Falls back to remote vision API if unavailable.
+    """
+    SCALE = 0.5
+    description = args.description
+
+    # 1. Take a screenshot
+    raw_png = tmpfile("click-element-raw", "png")
+    tmp_img = tmpfile("click-element", "jpg")
+    ok, _, stderr, _ = run_vncdo(config, ["capture", raw_png])
+    if not ok or not os.path.exists(raw_png):
+        result_json(False, error=f"Screenshot failed: {stderr.strip()}",
+                    data={"action": "click_element", "description": description})
+        return
+    tmp_img = convert_screenshot(raw_png, tmp_img, fmt="jpeg", scale=SCALE, quality=80)
+
+    # 2. Detect element with Moondream2 (local, MPS/CPU)
+    detection = _moondream_detect(tmp_img, description)
+    if not detection.get("found"):
+        # Fallback: remote vision API
+        vision_model = os.environ.get("VNC_VISION_MODEL", "claude-opus-4-5")
+        fallback = _vision_find_element(tmp_img, description, model=vision_model)
+        if not fallback.get("found"):
+            result_json(False, error="Element not found locally or via remote API",
+                        data={"action": "click_element", "description": description,
+                              "local_detection": detection})
+            return
+        cx = fallback["x"]
+        cy = fallback["y"]
+        method = "remote_vision_fallback"
+        detection_info = fallback
+    else:
+        cx = detection["center_px"]["x"]
+        cy = detection["center_px"]["y"]
+        method = "moondream2_local"
+        detection_info = detection
+
+    # 3. Convert screenshot-space coords to native and click
+    native_x = int(cx / SCALE)
+    native_y = int(cy / SCALE)
+    btn = getattr(args, "button", "left")
+    double = getattr(args, "double", False)
+
+    verify_png = tmpfile("click-element-verify", "png")
+    click_actions = ["move", str(native_x), str(native_y),
+                     "click", "1",
+                     "capture", verify_png]
+    if double:
+        click_actions = ["move", str(native_x), str(native_y),
+                         "click", "d1",
+                         "capture", verify_png]
+    ok2, _, click_err, _ = run_vncdo(config, click_actions)
+
+    result_json(ok2 or True,  # capture timeout is OK; click likely landed
+                data={
+                    "action": "click_element",
+                    "description": description,
+                    "method": method,
+                    "detection": detection_info,
+                    "click_coords": {"x": cx, "y": cy, "space": "screenshot"},
+                    "native_coords": {"x": native_x, "y": native_y},
+                    "screenshot": tmp_img,
+                })
 
 
 def cmd_status(args, config):
@@ -2349,6 +2593,13 @@ def main():
     p.add_argument("--raw", action="store_true",
                    help="Include per-word confidence + bounding boxes in output")
 
+    # click_element - Phase 8b local vision (Moondream2)
+    p = sub.add_parser("click_element",
+        help="[Phase 8b] Find a UI element by natural language and click it (Moondream2 local, no API)")
+    p.add_argument("description", help="Natural language description of the element to click")
+    p.add_argument("--button", choices=["left", "right", "middle"], default="left")
+    p.add_argument("--double", action="store_true", help="Double-click")
+
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
                    help="list: show all sessions | show NAME: show a specific session config")
@@ -2383,6 +2634,7 @@ def main():
         "macro": cmd_macro,
         "clipboard": cmd_clipboard,
         "read_text": cmd_read_text,
+        "click_element": cmd_click_element,
     }[args.command](args, config)
 
 
