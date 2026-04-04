@@ -1474,7 +1474,75 @@ def cmd_assert_visible(args, config):
     sys.exit(0 if found else 1)
 
 
-# ─── Phase 8b: Local Vision — Moondream2 click_element ──────────────────────
+# ─── Phase 8b: Local Vision — Moondream2 + Gemma4 click_element ────────────
+
+GEMMA4_ENDPOINT = os.environ.get("GEMMA4_ENDPOINT", "http://127.0.0.1:8890")
+GEMMA4_MODEL = "mlx-community/gemma-4-26b-a4b-it-4bit"
+
+_GEMMA4_DETECTION_PROMPT = '''Look at this screenshot of a macOS desktop. Locate: "{query}"
+
+If visible, return ONLY this JSON:
+{{"found":true,"x_min":<0-1>,"y_min":<0-1>,"x_max":<0-1>,"y_max":<0-1>,"confidence":"high"|"medium"|"low","note":"<optional>"}}
+
+If not visible: {{"found":false,"note":"<why>"}}
+
+Return only the JSON.'''
+
+def _gemma4_detect(image_path, query, model=None):
+    """
+    Run element detection via local Gemma4 server (port 8890, OpenAI-compatible).
+    Better reasoning than Moondream2, similar latency (~5-8s). No API cost.
+    Returns same format as _moondream_detect.
+    """
+    import base64, json as _json, time, urllib.request
+    from pathlib import Path as _Path
+    model = model or GEMMA4_MODEL
+    suffix = _Path(image_path).suffix.lower()
+    mime = "image/jpeg" if suffix in (".jpg", ".jpeg") else "image/png"
+    with open(image_path, "rb") as f:
+        img_b64 = base64.b64encode(f.read()).decode()
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}},
+            {"type": "text", "text": _GEMMA4_DETECTION_PROMPT.format(query=query)},
+        ]}],
+        "max_tokens": 200, "temperature": 0.0,
+    }
+    t0 = time.time()
+    req = urllib.request.Request(
+        f"{GEMMA4_ENDPOINT}/v1/chat/completions",
+        data=_json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": "vnc-control/1.0"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = _json.loads(resp.read())
+    except Exception as e:
+        return {"found": False, "error": str(e), "elapsed_s": round(time.time() - t0, 2)}
+    elapsed = time.time() - t0
+    raw = body["choices"][0]["message"]["content"].strip()
+    try:
+        text = raw
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"): text = text[4:]
+        result = _json.loads(text.strip())
+    except _json.JSONDecodeError:
+        return {"found": False, "error": "JSON parse failed", "raw": raw[:300], "elapsed_s": round(elapsed, 2)}
+    result["elapsed_s"] = round(elapsed, 2)
+    result["backend"] = "gemma4"
+    if result.get("found"):
+        from PIL import Image as _Image
+        w, h = _Image.open(image_path).size
+        x0, y0 = result["x_min"] * w, result["y_min"] * h
+        x1, y1 = result["x_max"] * w, result["y_max"] * h
+        result["image_size"] = [w, h]
+        result["box_px"] = {"x_min": round(x0), "y_min": round(y0), "x_max": round(x1), "y_max": round(y1)}
+        result["center_px"] = {"x": round((x0 + x1) / 2), "y": round((y0 + y1) / 2)}
+    return result
 
 _moondream_model_cache = None  # (model, tokenizer) cached across calls
 
@@ -1561,8 +1629,16 @@ def cmd_click_element(args, config):
         return
     tmp_img = convert_screenshot(raw_png, tmp_img, fmt="jpeg", scale=SCALE, quality=80)
 
-    # 2. Detect element with Moondream2 (local, MPS/CPU)
-    detection = _moondream_detect(tmp_img, description)
+    # 2. Detect element — choose backend
+    backend = getattr(args, "backend", "moondream")
+    detection = None
+    if backend == "gemma4":
+        detection = _gemma4_detect(tmp_img, description)
+        method = "gemma4_local"
+    else:  # default: moondream
+        detection = _moondream_detect(tmp_img, description)
+        method = "moondream2_local"
+
     if not detection.get("found"):
         # Fallback: remote vision API
         vision_model = os.environ.get("VNC_VISION_MODEL", "claude-opus-4-5")
@@ -1579,7 +1655,6 @@ def cmd_click_element(args, config):
     else:
         cx = detection["center_px"]["x"]
         cy = detection["center_px"]["y"]
-        method = "moondream2_local"
         detection_info = detection
 
     # 3. Convert screenshot-space coords to native and click
@@ -2599,6 +2674,8 @@ def main():
     p.add_argument("description", help="Natural language description of the element to click")
     p.add_argument("--button", choices=["left", "right", "middle"], default="left")
     p.add_argument("--double", action="store_true", help="Double-click")
+    p.add_argument("--backend", choices=["moondream", "gemma4", "remote"], default="moondream",
+                   help="Vision backend: moondream (local ~5s), gemma4 (local server ~5s, better reasoning), remote (Anthropic API)")
 
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
