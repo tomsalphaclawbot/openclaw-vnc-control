@@ -103,6 +103,31 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 - **vncdotool**: Mature CLI/lib but no structured output, not agent-oriented
 - **Result**: No existing tool provides standalone VNC bridge for AI agent loops. Gap confirmed.
 
+## Sprint H — Vision-Assisted Coordinate Precision 🔴 HIGH PRIORITY
+
+**Problem:** Click coordinates from LLM vision descriptions are approximate and unreliable. System dialogs re-trigger when clicks miss. Automated workflows (sudo prompts, permission dialogs, form fields) require pixel-accurate targeting.
+
+**Goal:** replace "LLM guesses coordinates" with "local vision model detects bounding box, click the center."
+
+### Subtasks
+- [ ] **Calibration audit** — verify screenshot-space → native-space coordinate math end-to-end with a synthetic marker test (draw pixel at exact known coord, screenshot, verify round-trip accuracy)
+- [ ] **Evaluate Moondream2** (`vikhyatk/moondream2`) — compact 1.86B vision model, MLX port available, strong UI element grounding. Test: screenshot + "click the Allow button" → bounding box accuracy.
+- [ ] **Evaluate Florence-2** (Microsoft) — strong at grounding/detection, small footprint (~0.2B), CoreML compatible. Compare to Moondream2 on button detection accuracy.
+- [ ] **Evaluate Meta SAM2** — segment-anything-2 for click-point generation. Likely overkill but test if accuracy warrants the RAM cost.
+- [ ] **Build `click_element(description)` command** — natural language → local vision model → precise center coords → click. Fallback to remote API vision if local model unavailable.
+- [ ] **Click verification loop** — post-click screenshot diff to confirm state change (dialog dismissed, etc.). Retry with offset correction if unchanged.
+- [ ] **Calibration test suite** — synthetic screenshots with buttons at known positions, measure model detection error distribution.
+- [ ] **Update SKILL.md** with new `click_element` command and local-model setup instructions.
+- [ ] Tag v0.5.0 on completion.
+
+### Decision criteria
+- Must run locally (no per-click API latency)
+- Apple Silicon / MLX preferred
+- Target: button center within 5px
+- Vision model RAM footprint: ≤4GB
+
+---
+
 ## Immediate Next Actions
 1. ~~Fix lock screen unlock reliability (Issue #3)~~ ✅ detect_lock_screen + unlock with retry (2026-03-18)
 2. ~~Create `.env.example` template~~ ✅ done 2026-03-18
