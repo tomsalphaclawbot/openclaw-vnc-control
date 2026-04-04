@@ -103,6 +103,65 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 - **vncdotool**: Mature CLI/lib but no structured output, not agent-oriented
 - **Result**: No existing tool provides standalone VNC bridge for AI agent loops. Gap confirmed.
 
+## Sprint I — Vision Backend Benchmark Suite 🟡 NEXT
+
+**Goal:** Systematic, reproducible comparison of all detection backends against the Click Lab. Before open-sourcing, anyone choosing a backend should have real data, not anecdotes.
+
+**Test fixture:** `labs/vnc-click-lab/` — 22 named buttons in a 6×4 grid, known `xPct`/`yPct` ground-truth positions, existing log API. Already proven 22/22 by human-clicking. Now run all backends against it.
+
+### Subtasks
+
+#### I-1: Click Lab — start + health check script
+- [ ] Script `bench/start_click_lab.sh` — launch `npm run dev` in lab dir, wait for port 3000 ready, open in browser via `open` command
+- [ ] Verify lab is visible and navigable from a VNC screenshot
+- [ ] Document how to position/size the browser window deterministically for consistent coordinates
+
+#### I-2: Ground truth fixture
+- [ ] Script `bench/ground_truth.py` — fetches button positions from the running lab page (parse `xPct`/`yPct` from JS or a `/api/buttons` endpoint we add)
+- [ ] Alternatively: hardcode the 22 button positions in a `bench/fixtures.json` from the known grid formula (`startX=40, endX=90, startY=22, endY=88, cols=6, rows=4`)
+- [ ] Output: `{"btn-1": {"label": "ATLAS PLUM", "x_pct": 40.0, "y_pct": 22.0}, ...}`
+
+#### I-3: Benchmark runner
+- [ ] Script `bench/run_benchmark.py` — for each backend × each button:
+  1. Take screenshot of the lab
+  2. Call `detect_element(image, f'button labeled {label}', backend=backend)`
+  3. Compare detected center (normalized) vs ground truth (xPct/yPct)
+  4. Record: found (bool), error_px, error_pct, elapsed_s, confidence
+- [ ] Backends to test: `moondream`, `gemma4`, `anthropic`
+- [ ] Output: `bench/results/YYYY-MM-DD-HH-MM-{backend}.json`
+
+#### I-4: Metrics + report
+- [ ] Script `bench/report.py` — reads results JSON(s), outputs:
+  - Per-backend: accuracy (% found), median error_px, p95 error_px, median latency, total cost (for remote backends)
+  - Per-button: which buttons each model struggled with (small text? similar colors? edge positions?)
+  - Markdown table for README
+- [ ] First-pass target: `moondream` and `anthropic` baselines (Gemma4 needs server running)
+
+#### I-5: Extend Click Lab with more element types
+- [ ] Add a text input field (test: "type in the search box")
+- [ ] Add a dropdown / select element
+- [ ] Add small icon buttons (stress test for small targets)
+- [ ] Add two visually similar buttons with different labels (hardest case)
+- [ ] Goal: test beyond rectangular colored buttons into realistic UI diversity
+
+#### I-6: Integrate results into docs
+- [ ] Add benchmark results table to `docs/vision-models.md`
+- [ ] Update README with "Benchmark results" section linking to full data
+- [ ] Add `bench/README.md` explaining how to reproduce
+
+#### I-7: CI smoke (optional, if remote backend available)
+- [ ] Add a lightweight single-button detection test to CI using a static screenshot fixture
+- [ ] Tests the detection pipeline without needing live VNC or a running browser
+
+### Definition of done
+- All three backends benchmarked against all 22 buttons
+- Metrics: accuracy %, median px error, p95 px error, median latency
+- Results committed to `bench/results/`
+- `docs/vision-models.md` updated with the data
+- `bench/README.md` explains how to reproduce
+
+---
+
 ## Sprint H — Vision-Assisted Coordinate Precision 🔴 HIGH PRIORITY
 
 **Problem:** Click coordinates from LLM vision descriptions are approximate and unreliable. System dialogs re-trigger when clicks miss. Automated workflows (sudo prompts, permission dialogs, form fields) require pixel-accurate targeting.
