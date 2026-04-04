@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useCoordReporter } from "../lib/useCoordReporter";
 
 type ButtonDef = {
   id: string;
@@ -197,7 +198,7 @@ export default function VncClickLabPage() {
     };
   }
 
-  function getWindowMetrics(): WindowMetrics {
+  const getWindowMetrics = useCallback((): WindowMetrics => {
     const dpr = window.devicePixelRatio || 1;
     return {
       scrollX: round4(window.scrollX),
@@ -210,7 +211,7 @@ export default function VncClickLabPage() {
       screenY: round4(window.screenY),
       devicePixelRatio: round4(dpr),
     };
-  }
+  }, []);
 
   function deriveScreenFromPage(pageX: number, pageY: number, metrics: WindowMetrics): DerivedScreenPoint {
     const clientX = pageX - metrics.scrollX;
@@ -404,6 +405,8 @@ export default function VncClickLabPage() {
     );
   }
 
+  const { reportCoords, coordStatus } = useCoordReporter();
+
   return (
     <main className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto max-w-6xl px-4 py-4">
@@ -412,10 +415,22 @@ export default function VncClickLabPage() {
           22 distributed buttons + named typing fields. Every button click now logs page/client/screen
           telemetry so we can calibrate pageX/pageY → true screen coordinates.
         </p>
-        <p className="mt-2 rounded bg-slate-900/80 px-3 py-2 text-xs text-slate-200">
-          {lastEvent}
-          {isBusy ? " (logging...)" : ""}
-        </p>
+        <div className="mt-2 flex items-center gap-3">
+          <p className="flex-1 rounded bg-slate-900/80 px-3 py-2 text-xs text-slate-200">
+            {lastEvent || coordStatus}
+            {isBusy ? " (logging...)" : ""}
+          </p>
+          <button
+            id="report_coords_btn"
+            data-element-id="report_coords_btn"
+            data-element-label="Report Coords"
+            data-element-kind="button"
+            onClick={() => { void reportCoords(); }}
+            className="rounded bg-violet-700 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-600 whitespace-nowrap"
+          >
+            📍 Report Coords
+          </button>
+        </div>
       </div>
 
       <section
@@ -431,6 +446,9 @@ export default function VncClickLabPage() {
           <div className="mb-3 grid grid-cols-2 gap-2">
             <button
               id="focus_agent_input"
+              data-element-id="focus_agent_input"
+              data-element-label="Focus agent_input"
+              data-element-kind="button"
               className="rounded bg-sky-700 px-2 py-1 text-xs font-semibold text-white hover:bg-sky-600"
               onClick={(e) => {
                 e.stopPropagation();
@@ -442,6 +460,9 @@ export default function VncClickLabPage() {
             </button>
             <button
               id="focus_agent_text_field"
+              data-element-id="focus_agent_text_field"
+              data-element-label="Focus agent_text_field"
+              data-element-kind="button"
               className="rounded bg-emerald-700 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-600"
               onClick={(e) => {
                 e.stopPropagation();
@@ -460,6 +481,9 @@ export default function VncClickLabPage() {
             ref={inputRef}
             id="agent_input"
             name="agent_input"
+            data-element-id="agent_input"
+            data-element-label="agent_input text field"
+            data-element-kind="input"
             value={agentInput}
             onChange={(e) => setAgentInput(e.target.value)}
             onFocus={() => {
@@ -483,6 +507,9 @@ export default function VncClickLabPage() {
             ref={textRef}
             id="agent_text_field"
             name="agent_text_field"
+            data-element-id="agent_text_field"
+            data-element-label="agent_text_field textarea"
+            data-element-kind="textarea"
             value={agentText}
             onChange={(e) => setAgentText(e.target.value)}
             onFocus={() => {
@@ -503,6 +530,10 @@ export default function VncClickLabPage() {
         {buttons.map((btn) => (
           <button
             key={btn.id}
+            id={btn.id}
+            data-element-id={btn.id}
+            data-element-label={btn.label}
+            data-element-kind="grid-button"
             onClick={(e) => {
               void handleButtonClick(btn, e);
             }}

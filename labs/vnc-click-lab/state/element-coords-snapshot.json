@@ -1,0 +1,523 @@
+{
+  "capturedAt": "2026-04-04T21:19:05.801Z",
+  "receivedAt": "2026-04-04T21:19:05.813Z",
+  "windowMetrics": {
+    "screenX": 0,
+    "screenY": 39,
+    "innerWidth": 1710,
+    "innerHeight": 913,
+    "outerWidth": 1710,
+    "outerHeight": 1000,
+    "devicePixelRatio": 2,
+    "scrollX": 0,
+    "scrollY": 0
+  },
+  "elements": [
+    {
+      "id": "nav_home",
+      "label": "Home",
+      "kind": "nav-link",
+      "rect": {
+        "top": 8,
+        "left": 83.8906,
+        "right": 133.1875,
+        "bottom": 32,
+        "width": 49.2969,
+        "height": 24
+      },
+      "center": {
+        "clientX": 108.5391,
+        "clientY": 20
+      },
+      "screen": {
+        "cssX": 108.5391,
+        "cssY": 146,
+        "nativeX": 217.0781,
+        "nativeY": 292
+      }
+    },
+    {
+      "id": "nav_grid__easy_",
+      "label": "Grid (Easy)",
+      "kind": "nav-link",
+      "rect": {
+        "top": 8,
+        "left": 137.1875,
+        "right": 215.9844,
+        "bottom": 32,
+        "width": 78.7969,
+        "height": 24
+      },
+      "center": {
+        "clientX": 176.5859,
+        "clientY": 20
+      },
+      "screen": {
+        "cssX": 176.5859,
+        "cssY": 146,
+        "nativeX": 353.1719,
+        "nativeY": 292
+      }
+    },
+    {
+      "id": "nav_forms",
+      "label": "Forms",
+      "kind": "nav-link",
+      "rect": {
+        "top": 8,
+        "left": 219.9844,
+        "right": 271.3516,
+        "bottom": 32,
+        "width": 51.3672,
+        "height": 24
+      },
+      "center": {
+        "clientX": 245.668,
+        "clientY": 20
+      },
+      "screen": {
+        "cssX": 245.668,
+        "cssY": 146,
+        "nativeX": 491.3359,
+        "nativeY": 292
+      }
+    },
+    {
+      "id": "nav_icons",
+      "label": "Icons",
+      "kind": "nav-link",
+      "rect": {
+        "top": 8,
+        "left": 275.3516,
+        "right": 321.6563,
+        "bottom": 32,
+        "width": 46.3047,
+        "height": 24
+      },
+      "center": {
+        "clientX": 298.5039,
+        "clientY": 20
+      },
+      "screen": {
+        "cssX": 298.5039,
+        "cssY": 146,
+        "nativeX": 597.0078,
+        "nativeY": 292
+      }
+    },
+    {
+      "id": "nav_modals",
+      "label": "Modals",
+      "kind": "nav-link",
+      "rect": {
+        "top": 8,
+        "left": 325.6563,
+        "right": 382.5469,
+        "bottom": 32,
+        "width": 56.8906,
+        "height": 24
+      },
+      "center": {
+        "clientX": 354.1016,
+        "clientY": 20
+      },
+      "screen": {
+        "cssX": 354.1016,
+        "cssY": 146,
+        "nativeX": 708.2031,
+        "nativeY": 292
+      }
+    },
+    {
+      "id": "nav_density",
+      "label": "Density",
+      "kind": "nav-link",
+      "rect": {
+        "top": 8,
+        "left": 386.5469,
+        "right": 445.25,
+        "bottom": 32,
+        "width": 58.7031,
+        "height": 24
+      },
+      "center": {
+        "clientX": 415.8984,
+        "clientY": 20
+      },
+      "screen": {
+        "cssX": 415.8984,
+        "cssY": 146,
+        "nativeX": 831.7969,
+        "nativeY": 292
+      }
+    },
+    {
+      "id": "nav_dynamic",
+      "label": "Dynamic",
+      "kind": "nav-link",
+      "rect": {
+        "top": 8,
+        "left": 449.25,
+        "right": 514.2344,
+        "bottom": 32,
+        "width": 64.9844,
+        "height": 24
+      },
+      "center": {
+        "clientX": 481.7422,
+        "clientY": 20
+      },
+      "screen": {
+        "cssX": 481.7422,
+        "cssY": 146,
+        "nativeX": 963.4844,
+        "nativeY": 292
+      }
+    },
+    {
+      "id": "report_coords_btn",
+      "label": "Report Coords",
+      "kind": "button",
+      "rect": {
+        "top": 77,
+        "left": 1053.2578,
+        "right": 1175,
+        "bottom": 125,
+        "width": 121.7422,
+        "height": 48
+      },
+      "center": {
+        "clientX": 1114.1289,
+        "clientY": 101
+      },
+      "screen": {
+        "cssX": 1114.1289,
+        "cssY": 227,
+        "nativeX": 2228.2578,
+        "nativeY": 454
+      }
+    },
+    {
+      "id": "icon_edit",
+      "label": "Edit icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 298,
+        "left": 695,
+        "right": 735,
+        "bottom": 338,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 715,
+        "clientY": 318
+      },
+      "screen": {
+        "cssX": 715,
+        "cssY": 444,
+        "nativeX": 1430,
+        "nativeY": 888
+      }
+    },
+    {
+      "id": "icon_delete",
+      "label": "Delete icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 298,
+        "left": 751,
+        "right": 791,
+        "bottom": 338,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 771,
+        "clientY": 318
+      },
+      "screen": {
+        "cssX": 771,
+        "cssY": 444,
+        "nativeX": 1542,
+        "nativeY": 888
+      }
+    },
+    {
+      "id": "icon_copy",
+      "label": "Copy icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 298,
+        "left": 807,
+        "right": 847,
+        "bottom": 338,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 827,
+        "clientY": 318
+      },
+      "screen": {
+        "cssX": 827,
+        "cssY": 444,
+        "nativeX": 1654,
+        "nativeY": 888
+      }
+    },
+    {
+      "id": "icon_share",
+      "label": "Share icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 298,
+        "left": 863,
+        "right": 903,
+        "bottom": 338,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 883,
+        "clientY": 318
+      },
+      "screen": {
+        "cssX": 883,
+        "cssY": 444,
+        "nativeX": 1766,
+        "nativeY": 888
+      }
+    },
+    {
+      "id": "icon_pin",
+      "label": "Pin icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 298,
+        "left": 919,
+        "right": 959,
+        "bottom": 338,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 939,
+        "clientY": 318
+      },
+      "screen": {
+        "cssX": 939,
+        "cssY": 444,
+        "nativeX": 1878,
+        "nativeY": 888
+      }
+    },
+    {
+      "id": "icon_star",
+      "label": "Star icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 298,
+        "left": 975,
+        "right": 1015,
+        "bottom": 338,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 995,
+        "clientY": 318
+      },
+      "screen": {
+        "cssX": 995,
+        "cssY": 444,
+        "nativeX": 1990,
+        "nativeY": 888
+      }
+    },
+    {
+      "id": "icon_download",
+      "label": "Download icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 362,
+        "left": 695,
+        "right": 735,
+        "bottom": 402,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 715,
+        "clientY": 382
+      },
+      "screen": {
+        "cssX": 715,
+        "cssY": 508,
+        "nativeX": 1430,
+        "nativeY": 1016
+      }
+    },
+    {
+      "id": "icon_archive",
+      "label": "Archive icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 362,
+        "left": 751,
+        "right": 791,
+        "bottom": 402,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 771,
+        "clientY": 382
+      },
+      "screen": {
+        "cssX": 771,
+        "cssY": 508,
+        "nativeX": 1542,
+        "nativeY": 1016
+      }
+    },
+    {
+      "id": "icon_close",
+      "label": "Close icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 362,
+        "left": 807,
+        "right": 847,
+        "bottom": 402,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 827,
+        "clientY": 382
+      },
+      "screen": {
+        "cssX": 827,
+        "cssY": 508,
+        "nativeX": 1654,
+        "nativeY": 1016
+      }
+    },
+    {
+      "id": "icon_check",
+      "label": "Confirm icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 362,
+        "left": 863,
+        "right": 903,
+        "bottom": 402,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 883,
+        "clientY": 382
+      },
+      "screen": {
+        "cssX": 883,
+        "cssY": 508,
+        "nativeX": 1766,
+        "nativeY": 1016
+      }
+    },
+    {
+      "id": "icon_search",
+      "label": "Search icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 362,
+        "left": 919,
+        "right": 959,
+        "bottom": 402,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 939,
+        "clientY": 382
+      },
+      "screen": {
+        "cssX": 939,
+        "cssY": 508,
+        "nativeX": 1878,
+        "nativeY": 1016
+      }
+    },
+    {
+      "id": "icon_settings",
+      "label": "Settings icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 362,
+        "left": 975,
+        "right": 1015,
+        "bottom": 402,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 995,
+        "clientY": 382
+      },
+      "screen": {
+        "cssX": 995,
+        "cssY": 508,
+        "nativeX": 1990,
+        "nativeY": 1016
+      }
+    },
+    {
+      "id": "icon_close_dialog_a",
+      "label": "Close Dialog A icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 515,
+        "left": 779.4922,
+        "right": 819.4922,
+        "bottom": 555,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 799.4922,
+        "clientY": 535
+      },
+      "screen": {
+        "cssX": 799.4922,
+        "cssY": 661,
+        "nativeX": 1598.9844,
+        "nativeY": 1322
+      }
+    },
+    {
+      "id": "icon_close_dialog_b",
+      "label": "Close Dialog B icon button",
+      "kind": "icon-button",
+      "rect": {
+        "top": 515,
+        "left": 890.5938,
+        "right": 930.5938,
+        "bottom": 555,
+        "width": 40,
+        "height": 40
+      },
+      "center": {
+        "clientX": 910.5938,
+        "clientY": 535
+      },
+      "screen": {
+        "cssX": 910.5938,
+        "cssY": 661,
+        "nativeX": 1821.1875,
+        "nativeY": 1322
+      }
+    }
+  ]
+}
