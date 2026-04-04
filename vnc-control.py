@@ -1615,11 +1615,26 @@ def cmd_click_element(args, config):
     """
     Phase 8b: click_element — find a UI element by natural language, click its center.
     Uses Moondream2 locally (no API call, ~4-8s). Falls back to remote vision API if unavailable.
+
+    COORDINATE PIPELINE (critical — must stay in sync):
+      VNC native res (e.g. 3420x2214 on this host)
+        → screenshot captured at `capture_scale` (default 0.5 → 1710x1107)
+          → screenshot sent to vision model at exactly that size
+            → model returns center_px in screenshot-space
+              → resolve_native_coords(cx, cy, "screenshot", config, scale=capture_scale)
+                → native VNC coords used for the actual click
+
+    Known issue: different models may return coords in different spaces:
+      - Moondream2: returns px coords in the image fed to it (screenshot-space) ✓
+      - Gemma4: returns normalized 0-1 floats → we convert to px using image dims ✓
+      - Remote Anthropic vision: returns px coords in the image fed to it ✓
+    The actual image dims are always checked at detection time, not assumed.
+    See docs/vision-models.md for full details.
     """
-    SCALE = 0.5
     description = args.description
 
-    # 1. Take a screenshot
+    # 1. Take a screenshot — record exact scale used (model MUST receive this exact image)
+    _, _, capture_scale, quality = capture_settings(args)
     raw_png = tmpfile("click-element-raw", "png")
     tmp_img = tmpfile("click-element", "jpg")
     ok, _, stderr, _ = run_vncdo(config, ["capture", raw_png])
@@ -1627,7 +1642,7 @@ def cmd_click_element(args, config):
         result_json(False, error=f"Screenshot failed: {stderr.strip()}",
                     data={"action": "click_element", "description": description})
         return
-    tmp_img = convert_screenshot(raw_png, tmp_img, fmt="jpeg", scale=SCALE, quality=80)
+    tmp_img = convert_screenshot(raw_png, tmp_img, fmt="jpeg", scale=capture_scale, quality=quality)
 
     # 2. Detect element — choose backend
     backend = getattr(args, "backend", "moondream")
@@ -1657,20 +1672,18 @@ def cmd_click_element(args, config):
         cy = detection["center_px"]["y"]
         detection_info = detection
 
-    # 3. Convert screenshot-space coords to native and click
-    native_x = int(cx / SCALE)
-    native_y = int(cy / SCALE)
+    # 3. Convert screenshot-space coords to native using the recorded capture_scale.
+    #    This is the critical step: model coords are in screenshot-space, VNC needs native.
+    native_x, native_y, native_w, native_h, _ = resolve_native_coords(
+        cx, cy, "screenshot", config, scale=capture_scale
+    )
     btn = getattr(args, "button", "left")
     double = getattr(args, "double", False)
 
     verify_png = tmpfile("click-element-verify", "png")
     click_actions = ["move", str(native_x), str(native_y),
-                     "click", "1",
+                     "click", "d1" if double else "1",
                      "capture", verify_png]
-    if double:
-        click_actions = ["move", str(native_x), str(native_y),
-                         "click", "d1",
-                         "capture", verify_png]
     ok2, _, click_err, _ = run_vncdo(config, click_actions)
 
     result_json(ok2 or True,  # capture timeout is OK; click likely landed
@@ -1680,6 +1693,8 @@ def cmd_click_element(args, config):
                     "method": method,
                     "detection": detection_info,
                     "click_coords": {"x": cx, "y": cy, "space": "screenshot"},
+                    "capture_scale": capture_scale,
+                    "native_res": {"w": native_w, "h": native_h},
                     "native_coords": {"x": native_x, "y": native_y},
                     "screenshot": tmp_img,
                 })

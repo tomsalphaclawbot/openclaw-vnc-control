@@ -146,9 +146,49 @@ With default 50% scale: capture coords are automatically doubled for native reso
 | JPEG | 0.5 | ~350 KB | **Default — ideal for AI vision** |
 | JPEG | 0.25 | ~110 KB | Bandwidth-constrained |
 
+## Coordinate Translation Layer
+
+This is the critical path between vision model output and actual VNC click. Any mismatch here causes wrong clicks.
+
+```
+VNC native resolution  (e.g. 3420 × 2214 on MacBook Air Retina)
+  ↓  capture at scale (default 0.5)
+Screenshot image       (e.g. 1710 × 1107)
+  ↓  sent to vision model
+Model output           (coords in screenshot-space, or normalized 0-1)
+  ↓  resolve_native_coords(cx, cy, "screenshot", config, scale=capture_scale)
+Native VNC coords      (used for move + click commands)
+```
+
+**Rule:** the scale used to produce the screenshot fed to the model must be the same scale used to invert the coords. If they differ, the click lands in the wrong place.
+
+### Per-model coord format
+
+| Model | Output format | How we convert |
+|-------|--------------|----------------|
+| Moondream2 | px in image fed to it (screenshot-space) | `resolve_native_coords(x, y, "screenshot", scale=capture_scale)` |
+| Gemma 4 (local) | normalized 0-1 floats | multiply by image dims → screenshot px → same as above |
+| Anthropic remote | px in image fed to it (screenshot-space) | same as Moondream2 |
+
+All paths go through the same `resolve_native_coords()` function. Adding a new model? Make sure it reports in one of these formats and route through the same function.
+
+---
+
 ## Known Issues & Lessons
 
 > Retested 2026-03-15. Status column reflects current state.
+
+### Vision Model Coordinate Accuracy (Sprint H)
+
+| Issue | Status | Notes |
+|-------|--------|-------|
+| **Resolution mismatch between models** | ⚠️ **KNOWN** | Each model was trained/evaluated at specific resolutions. Moondream2 was likely trained mostly on lower-res UI screenshots. Gemma 4 handles varied resolutions better. If detection is consistently off by a fixed offset or ratio, check what resolution the model expects vs what it receives. |
+| **Gemma 4 normalized coords require image dims at parse time** | ✅ **HANDLED** | `_gemma4_detect()` opens the image with PIL to get actual dims before converting 0-1 floats to px. Never assume image dims. |
+| **Scale drift if profile changes** | ⚠️ **KNOWN** | If `--profile` or `--scale` changes between screenshot and coord interpretation, clicks will be off. `cmd_click_element` records `capture_scale` from `capture_settings()` and passes it to `resolve_native_coords()` — do not hardcode `SCALE = 0.5` in new code. |
+| **Moondream2 hallucinates absent elements** | ⚠️ **KNOWN** | Moondream2 will sometimes return a bounding box for an element that doesn't exist (e.g., returned coords for "close button" on a dialog that has none). Gemma 4 correctly returns `found: false` in the same case. Prefer Gemma 4 (`--backend gemma4`) for precision work. |
+| **Florence-2 not yet evaluated** | 🔲 **TODO** | Florence-2 (~232M) uses `<OPEN_VOCABULARY_DETECTION>` tokens natively. Should be faster than Moondream2 on CPU. Sprint H task. |
+
+See [`docs/vision-models.md`](./docs/vision-models.md) for full model comparison.
 
 ### macOS ARD Specific
 
