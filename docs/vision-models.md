@@ -10,11 +10,10 @@ available for the `find_element`, `click_element`, and `assert_visible` commands
 ```
 Simple text? → cmd_read_text (Tesseract, 0.1s, free)
 Need coords?
-  ├── API cost OK? → find_element --model claude-opus-4-6 (best reasoning, ~3s, ~$0.01/call)
-  └── No API cost?
-        ├── Default → click_element (Moondream2 local, ~5-8s, MPS, no API)
-        └── High volume / batch → Gemma 4 local server (26B MoE, ~2s/img, ~42 tok/s)
-        └── Sub-1s needed → Florence-2 via CoreML (not yet implemented, Sprint H)
+  ├── Safety-critical / avoid false positives? → gemma4 (best measured specificity, ~3s)
+  ├── Element definitely present / max recall? → moondream (best measured recall, ~4.5s)
+  ├── API fallback available? → anthropic (requires ANTHROPIC_API_KEY)
+  └── Exploring new local options? → florence2 / falcon / sam2 (matrix probe + setup required)
 ```
 
 ---
@@ -50,7 +49,7 @@ python eval_moondream.py --screenshot screen.jpg --queries "Allow button" "Cance
 
 ---
 
-### Gemma 4 26B MoE (via local server) 🔬 TO BE TESTED
+### Gemma 4 26B MoE (via local server) ✅ MEASURED (2026-04-05)
 
 | Property | Value |
 |----------|-------|
@@ -61,7 +60,7 @@ python eval_moondream.py --screenshot screen.jpg --queries "Allow button" "Cance
 | Generation speed | ~42 tok/s (warm) |
 | TTFT | ~1.8s at 1K context (mlx-vlm 0.4.4 chunked prefill) |
 | Format | OpenAI-compatible JSON, multimodal (image + text) |
-| Task | Needs testing for bounding-box extraction from screenshots |
+| Task | Bounding-box extraction from screenshots benchmarked via matrix harness |
 
 **Approach for element detection:**
 Send screenshot as base64 image + prompt: "Where is the [Allow button]? Return JSON: {x_min, y_min, x_max, y_max} normalized 0-1."
@@ -73,7 +72,7 @@ Send screenshot as base64 image + prompt: "Where is the [Allow button]? Return J
 - Con: If running Docker + MLX, need iogpu.wired_limit_mb cap active
 - Con: No native grounding API — must parse JSON from text output (brittle)
 
-**Test script:** `eval_gemma4_vision.py` (TODO)
+**Benchmark harness:** `bench/run_benchmark_matrix.py` (measured in `bench/results/matrix-20260405/`)
 
 ---
 
@@ -127,16 +126,32 @@ python vnc-control.py find_element "the confirmation dialog's primary action but
 
 ---
 
-## Benchmark Summary (as of 2026-04-04)
+## Benchmark Summary (measured 2026-04-05)
 
-| Model | Latency | RAM | API Cost | Accuracy | Status |
-|-------|---------|-----|----------|----------|--------|
-| Moondream2 (local) | 4-8s | 1.5 GB | Free | Good | ✅ Integrated |
-| Gemma 4 26B (server) | ~2s warm | 15.5 GB | Free | ? | 🔬 To test |
-| Gemma 4 E4B (server) | ~0.5s warm | 5.2 GB | Free | ? | 🔬 To test |
-| Florence-2 | <1s | 1-3 GB | Free | ? | 🔲 Not installed |
-| Claude Opus | 2-4s | 0 | ~$0.01/call | Excellent | ✅ Integrated (fallback) |
-| Claude Haiku | 1-2s | 0 | ~$0.002/call | Good | ✅ Available |
+Matrix run used a deterministic Click Lab fixture (`8` positive + `2` negative prompts):
+- Fixture: `bench/results/matrix-20260405/fixture.json`
+- Image: `bench/results/matrix-20260405/fixture-click-lab.png`
+- Raw artifacts: `benchmark_matrix.json`, `benchmark_matrix.csv`, `benchmark_matrix.md`
+
+| Backend | Runnable | Pos Recall | Neg Specificity | Median Error (px) | P95 Error (px) | Median Latency (s) | Status |
+|---|---:|---:|---:|---:|---:|---:|---|
+| moondream | yes | 1.000 | 0.000 | 2.000 | 60.564 | 4.400 | ✅ Measured |
+| gemma4 | yes | 0.625 | 1.000 | 121.529 | 132.559 | 3.049 | ✅ Measured |
+| anthropic | no | - | - | - | - | - | ⛔ Missing `ANTHROPIC_API_KEY` |
+| falcon | no | - | - | - | - | - | ⛔ Model not cached (`tiiuae/falcon-11b-vision-instruct`) |
+| florence2 | no | - | - | - | - | - | ⛔ Model not cached (`microsoft/Florence-2-base-ft`) |
+| sam2 | no | - | - | - | - | - | ⛔ No text-grounding pipeline wired |
+
+### Measured recommendation order (this environment)
+
+For production click workflows, prioritize safety over raw recall:
+
+1. **gemma4** — fastest measured backend + zero false positives on negative prompts.
+2. **moondream** — excellent recall/precision on positive elements, but high hallucination risk when element is absent.
+3. **anthropic** (when key configured) — use as tie-breaker/fallback for ambiguous cases.
+4. **florence2** — next local candidate after model download; rerun matrix before promotion.
+5. **falcon** — experimental; only promote after measured matrix results exist.
+6. **sam2** — not directly comparable until text→box grounding is integrated.
 
 ---
 
@@ -146,7 +161,7 @@ python vnc-control.py find_element "the confirmation dialog's primary action but
 
 1. Add a `_detect_<model>(image_path, query) -> dict` function in `vnc-control.py`
 2. Return format: `{"found": bool, "center_px": {"x": int, "y": int}, "box_px": {...}, "elapsed_s": float}`
-3. Wire into `cmd_click_element` via backend selector arg (`--backend moondream|gemma4|florence2|remote`)
+3. Wire into `detect_element()` + `cmd_click_element` backend selector (`--backend moondream|gemma4|anthropic`; `remote` remains an alias for anthropic)
 4. Add eval script `eval_<model>.py` with screenshot test harness
 5. Update this doc
 
@@ -156,14 +171,33 @@ python vnc-control.py find_element "the confirmation dialog's primary action but
 # Default (Moondream2 local, no API)
 python vnc-control.py click_element "Allow button"
 
-# Force remote API fallback
-VNC_VISION_MODEL=claude-opus-4-6 python vnc-control.py click_element "Allow button" --backend remote
+# Force Anthropic API backend (remote alias still supported)
+VNC_VISION_MODEL=claude-opus-4-6 python vnc-control.py click_element "Allow button" --backend anthropic
 
-# Gemma4 (once eval_gemma4_vision.py is wired in)
+# Gemma4 local backend
 python vnc-control.py click_element "Allow button" --backend gemma4
 ```
 
 ---
+
+## Reproducible Benchmark Commands
+
+```bash
+# 1) Start fixture app
+bash bench/start_click_lab.sh
+
+# 2) Capture deterministic fixture + ground truth
+python3 bench/capture_fixture.py \
+  --base-url http://127.0.0.1:3015 \
+  --page /vnc-click-lab \
+  --out-dir bench/results \
+  --run-id matrix-YYYYMMDD
+
+# 3) Run full matrix
+/Users/openclaw/.openclaw/workspace/.venvs/moondream/bin/python bench/run_benchmark_matrix.py \
+  --fixture bench/results/matrix-YYYYMMDD/fixture.json \
+  --backends moondream,gemma4,anthropic,falcon,florence2,sam2
+```
 
 ## Environment Setup
 
@@ -178,4 +212,4 @@ bash ../gemma4-local/gemma4-server.sh   # starts on port 8890
 
 ---
 
-*Last updated: 2026-04-04 | Sprint H*
+*Last updated: 2026-04-05 | Sprint I benchmark matrix run (`matrix-20260405`)*

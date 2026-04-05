@@ -1,0 +1,21 @@
+backend,case_id,query,expected_found,found,elapsed_s,status,label,kind,expected_center_x,expected_center_y,pred_center_x,pred_center_y,error_px,error_dx_px,error_dy_px,classification,confidence,error,backend_note
+moondream,pos-agent_input,"input field labeled ""agent_input text field""",True,True,18.422,ok,agent_input text field,input,269.0,294.0,267.0,385.0,91.022,-2.0,91.0,tp,high,,
+moondream,pos-agent_text_field,"input field labeled ""agent_text_field textarea""",True,True,4.409,ok,agent_text_field textarea,textarea,269.0,385.0,265.0,385.0,4.0,-4.0,0.0,tp,high,,
+moondream,pos-focus_agent_input,"button labeled ""Focus agent_input""",True,True,4.317,ok,Focus agent_input,button,153.5,231.0,155.0,231.0,1.5,1.5,0.0,tp,high,,
+moondream,pos-focus_agent_text_field,"button labeled ""Focus agent_text_field""",True,True,4.398,ok,Focus agent_text_field,button,384.5,231.0,382.0,231.0,2.5,-2.5,0.0,tp,high,,
+moondream,pos-nav_density,"button labeled ""Density""",True,True,4.325,ok,Density,nav-link,415.914,20.0,416.0,19.0,1.004,0.086,-1.0,tp,high,,
+moondream,pos-nav_dynamic,"button labeled ""Dynamic""",True,True,4.536,ok,Dynamic,nav-link,481.758,20.0,481.0,19.0,1.255,-0.758,-1.0,tp,high,,
+moondream,pos-nav_forms,"button labeled ""Forms""",True,True,4.475,ok,Forms,nav-link,245.672,20.0,242.0,20.0,3.672,-3.672,0.0,tp,high,,
+moondream,pos-nav_grid__easy_,"button labeled ""Grid (Easy)""",True,True,4.403,ok,Grid (Easy),nav-link,176.586,20.0,177.0,19.0,1.082,0.414,-1.0,tp,high,,
+moondream,neg-no-such-grid-button,"button labeled ""OBSIDIAN BANANA""",False,True,4.348,ok,,,,,1022.0,638.0,,,,fp,high,,
+moondream,neg-no-such-icon-button,"icon button labeled ""Teleport""",False,True,4.352,ok,,,,,1534.0,324.0,,,,fp,high,,
+gemma4,pos-agent_input,"input field labeled ""agent_input text field""",True,False,58.222,ok,agent_input text field,input,269.0,294.0,,,,,,fn,,"The requested label 'agent_input text field' does not exist. There is an 'agent_input' field and an 'agent_text_field', but no single field with that combined label.","The requested label 'agent_input text field' does not exist. There is an 'agent_input' field and an 'agent_text_field', but no single field with that combined label."
+gemma4,pos-agent_text_field,"input field labeled ""agent_text_field textarea""",True,False,3.084,ok,agent_text_field textarea,textarea,269.0,385.0,,,,,,fn,,"The requested element 'input field labeled ""agent_text_field textarea""' was not found. There is a text field with the label 'agent_text_field', but it is not a textarea.","The requested element 'input field labeled ""agent_text_field textarea""' was not found. There is a text field with the label 'agent_text_field', but it is not a textarea."
+gemma4,pos-focus_agent_input,"button labeled ""Focus agent_input""",True,True,3.206,ok,Focus agent_input,button,153.5,231.0,154.0,228.0,3.041,0.5,-3.0,tp,high,,
+gemma4,pos-focus_agent_text_field,"button labeled ""Focus agent_text_field""",True,False,2.895,ok,Focus agent_text_field,button,384.5,231.0,,,,,,fn,,"The text 'Focus agent_text_field' is not a button label, but rather a label for a text field or a description of an action. There is no button with that exact label.","The text 'Focus agent_text_field' is not a button label, but rather a label for a text field or a description of an action. There is no button with that exact label."
+gemma4,pos-nav_density,"button labeled ""Density""",True,True,4.079,ok,Density,nav-link,415.914,20.0,427.0,152.0,132.465,11.086,132.0,tp,high,,
+gemma4,pos-nav_dynamic,"button labeled ""Dynamic""",True,True,3.014,ok,Dynamic,nav-link,481.758,20.0,475.0,20.0,6.758,-6.758,0.0,tp,high,,
+gemma4,pos-nav_forms,"button labeled ""Forms""",True,True,2.916,ok,Forms,nav-link,245.672,20.0,257.0,141.0,121.529,11.328,121.0,tp,high,,
+gemma4,pos-nav_grid__easy_,"button labeled ""Grid (Easy)""",True,True,4.042,ok,Grid (Easy),nav-link,176.586,20.0,189.0,152.0,132.582,12.414,132.0,tp,high,,
+gemma4,neg-no-such-grid-button,"button labeled ""OBSIDIAN BANANA""",False,False,2.199,ok,,,,,,,,,,tn,,,The button 'OBSIDIAN BANANA' was not found in the provided image.
+gemma4,neg-no-such-icon-button,"icon button labeled ""Teleport""",False,False,2.166,ok,,,,,,,,,,tn,,,The icon button labeled 'Teleport' was not found in the provided image.

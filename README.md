@@ -330,6 +330,27 @@ python3 scripts/click-calibrator.py \
 
 This writes `state/click-calibration.json` with affine correction coefficients and fit-error stats.
 
+## Benchmark Results (matrix-20260405)
+
+Measured with deterministic Click Lab fixture (`8` positive + `2` negative cases):
+
+| Backend | Runnable | Pos Recall | Neg Specificity | Median Error (px) | P95 Error (px) | Median Latency (s) |
+|---|---:|---:|---:|---:|---:|---:|
+| moondream | yes | 1.000 | 0.000 | 2.000 | 60.564 | 4.400 |
+| gemma4 | yes | 0.625 | 1.000 | 121.529 | 132.559 | 3.049 |
+| anthropic | no (`ANTHROPIC_API_KEY` missing) | - | - | - | - | - |
+| falcon | no (model not cached) | - | - | - | - | - |
+| florence2 | no (model not cached) | - | - | - | - | - |
+| sam2 | no (no text-grounding stack) | - | - | - | - | - |
+
+Artifacts:
+- `bench/results/matrix-20260405/benchmark_matrix.json`
+- `bench/results/matrix-20260405/benchmark_matrix.csv`
+- `bench/results/matrix-20260405/benchmark_matrix.md`
+- Repro runbook: `bench/README.md`
+
+Recommended backend order for this environment: `gemma4` → `moondream` → `anthropic` (if key configured) → `florence2` → `falcon` → `sam2`.
+
 ## History
 
 See [CHANGELOG.md](./CHANGELOG.md) for the full version history.

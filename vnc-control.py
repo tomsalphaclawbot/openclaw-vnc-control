@@ -1391,6 +1391,9 @@ def cmd_assert_visible(args, config):
 # Caller: resolve_native_coords(center.x, center.y, "screenshot", config, scale=capture_scale)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Lazy in-process cache for local model objects.
+_moondream_model_cache = None
+
 def _make_detection_result(found, query, backend, image_size=None,
                            box=None, confidence="low", note=None,
                            elapsed_s=0.0, error=None, raw_extra=None):
@@ -1442,7 +1445,7 @@ def detect_element(image_path, query, backend="moondream", config=None, capture_
     Args:
         image_path:    path to the screenshot (must be the EXACT image the model will see)
         query:         natural language description of the element
-        backend:       "moondream" | "gemma4" | "anthropic"
+        backend:       "moondream" | "gemma4" | "anthropic" ("remote" alias accepted)
         config:        VNC config dict (used if native coord conversion is needed by caller)
         capture_scale: scale used to produce image_path from native resolution
                        (stored in result for caller to use with resolve_native_coords)
@@ -1451,6 +1454,9 @@ def detect_element(image_path, query, backend="moondream", config=None, capture_
     Caller converts center to native: resolve_native_coords(r["center"]["x"], r["center"]["y"],
                                           "screenshot", config, scale=capture_scale)
     """
+    if backend == "remote":
+        backend = "anthropic"
+
     result = None
     if backend == "gemma4":
         result = _detect_gemma4(image_path, query)
@@ -2743,8 +2749,8 @@ def main():
     p.add_argument("description", help="Natural language description of the element to click")
     p.add_argument("--button", choices=["left", "right", "middle"], default="left")
     p.add_argument("--double", action="store_true", help="Double-click")
-    p.add_argument("--backend", choices=["moondream", "gemma4", "remote"], default="moondream",
-                   help="Vision backend: moondream (local ~5s), gemma4 (local server ~5s, better reasoning), remote (Anthropic API)")
+    p.add_argument("--backend", choices=["moondream", "gemma4", "anthropic", "remote"], default="moondream",
+                   help="Vision backend: moondream (local ~5s), gemma4 (local server ~5s, better reasoning), anthropic (remote API), remote (alias for anthropic)")
 
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
