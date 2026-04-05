@@ -92,7 +92,7 @@ Same approach as 26B but faster and lighter. Quality lower but fine for simple U
 
 ---
 
-### Florence-2 (Microsoft) 🔲 NOT YET EVALUATED
+### Florence-2 (Microsoft) 🧪 EVAL SCAFFOLD ADDED (NOT YET BENCHMARKED)
 
 | Property | Value |
 |----------|-------|
@@ -103,7 +103,16 @@ Same approach as 26B but faster and lighter. Quality lower but fine for simple U
 | Output | Bounding boxes via `<OPEN_VOCABULARY_DETECTION>` task token |
 
 **Why interesting:** Smallest model that can do grounding. Fast enough for real-time use.
-**Blocker:** Not yet installed or tested. Sprint H task.
+**Current status:** minimal scaffold script exists (`eval_florence2.py`) to unblock local runs.
+
+```bash
+python3 eval_florence2.py --screenshot /tmp/screen.jpg --query "Allow button"
+```
+
+Known remaining work:
+- Validate `parsed` output schema across multiple screenshots
+- Measure latency/accuracy vs Moondream2 and Gemma4 on click-lab scenarios
+- Decide whether to wire a `_detect_florence2()` backend into `detect_element()`
 
 ---
 
@@ -134,7 +143,7 @@ python vnc-control.py find_element "the confirmation dialog's primary action but
 | Moondream2 (local) | 4-8s | 1.5 GB | Free | Good | ✅ Integrated |
 | Gemma 4 26B (server) | ~2s warm | 15.5 GB | Free | ? | 🔬 To test |
 | Gemma 4 E4B (server) | ~0.5s warm | 5.2 GB | Free | ? | 🔬 To test |
-| Florence-2 | <1s | 1-3 GB | Free | ? | 🔲 Not installed |
+| Florence-2 | <1s (target) | 1-3 GB | Free | ? | 🧪 Scaffold only |
 | Claude Opus | 2-4s | 0 | ~$0.01/call | Excellent | ✅ Integrated (fallback) |
 | Claude Haiku | 1-2s | 0 | ~$0.002/call | Good | ✅ Available |
 
@@ -146,7 +155,7 @@ python vnc-control.py find_element "the confirmation dialog's primary action but
 
 1. Add a `_detect_<model>(image_path, query) -> dict` function in `vnc-control.py`
 2. Return format: `{"found": bool, "center_px": {"x": int, "y": int}, "box_px": {...}, "elapsed_s": float}`
-3. Wire into `cmd_click_element` via backend selector arg (`--backend moondream|gemma4|florence2|remote`)
+3. Wire into `cmd_click_element` via backend selector arg (`--backend moondream|gemma4|anthropic` + `remote` alias)
 4. Add eval script `eval_<model>.py` with screenshot test harness
 5. Update this doc
 

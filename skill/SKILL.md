@@ -112,6 +112,7 @@ All commands return JSON with `"ok": true/false` and action metadata.
 | `map` | `vnc-control.py map X Y --from screenshot --to native` | Convert coords programmatically |
 | `type` | `vnc-control.py [--profile ai] type "text"` | Type text string |
 | `key` | `vnc-control.py [--profile ai] key KEY` | Send special key (enter, tab, ctrl-c, etc.) |
+| `click_element` | `vnc-control.py [--profile ai] click_element "Allow button" [--backend moondream\|gemma4\|anthropic\|remote]` | Natural-language targeting via vision model + click |
 
 ---
 
@@ -223,6 +224,7 @@ Prefer `--format jpeg --scale 0.5` for agent loops — all text and UI elements 
 - `key escape` may timeout on macOS ARD — all other keys work reliably
 - One-shot CLI opens a new VNC connection per command; daemon mode maintains a persistent session
 - Click automatically captures a verification screenshot (returned in JSON as `verify_image`)
+- `click_element` includes objective state-change verification (`verification.change_pct`) and optional retry-on-no-change controls (`--verify-retries`, `--retry-offset`, `--require-state-change`)
 - Default coordinate input space is **screenshot space**; translation to native is automatic
 - For agent runs, prefer daemon mode + `--scale 0.5` for efficient capture
 - Lock/unlock native coordinates are calibrated for 3420×2214 (MacBook Air); adjust for other resolutions

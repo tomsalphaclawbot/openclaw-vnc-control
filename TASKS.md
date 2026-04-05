@@ -169,14 +169,14 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 **Goal:** replace "LLM guesses coordinates" with "local vision model detects bounding box, click the center."
 
 ### Subtasks
-- [ ] **Calibration audit** — verify screenshot-space → native-space coordinate math end-to-end with a synthetic marker test (draw pixel at exact known coord, screenshot, verify round-trip accuracy)
-- [ ] **Evaluate Moondream2** (`vikhyatk/moondream2`) — compact 1.86B vision model, MLX port available, strong UI element grounding. Test: screenshot + "click the Allow button" → bounding box accuracy.
-- [ ] **Evaluate Florence-2** (Microsoft) — strong at grounding/detection, small footprint (~0.2B), CoreML compatible. Compare to Moondream2 on button detection accuracy.
-- [ ] **Evaluate Meta SAM2** — segment-anything-2 for click-point generation. Likely overkill but test if accuracy warrants the RAM cost.
-- [ ] **Build `click_element(description)` command** — natural language → local vision model → precise center coords → click. Fallback to remote API vision if local model unavailable.
-- [ ] **Click verification loop** — post-click screenshot diff to confirm state change (dialog dismissed, etc.). Retry with offset correction if unchanged.
-- [ ] **Calibration test suite** — synthetic screenshots with buttons at known positions, measure model detection error distribution.
-- [ ] **Update SKILL.md** with new `click_element` command and local-model setup instructions.
+- [x] **Calibration audit** — synthetic marker round-trip audit implemented (`scripts/coord-calibration-audit.py`) with automated tests (`tests/test_coord_calibration_audit.py`) to measure screenshot→native precision objectively.
+- [x] **Evaluate Moondream2** (`vikhyatk/moondream2`) — integrated as primary local backend with eval harness (`eval_moondream.py`) and documented in `docs/vision-models.md`.
+- [ ] **Evaluate Florence-2** (Microsoft) — **de-scoped for this pass** pending local install + benchmark run; next command: `python3 eval_florence2.py --screenshot <path> --query "Allow button"` (scaffold/TODO tracked in docs).
+- [ ] **Evaluate Meta SAM2** — still pending; likely only worth it if Moondream/Gemma miss-rate remains high after calibration.
+- [x] **Build `click_element(description)` command** — shipped in v0.5.0 with local-first backends and Anthropic fallback.
+- [x] **Click verification loop** — now computes post-click change metrics and supports offset retry (`--verify-retries`, `--retry-offset`) plus strict mode (`--require-state-change`).
+- [x] **Calibration test suite** — synthetic screenshot benchmark path added via `scripts/coord-calibration-audit.py`.
+- [x] **Update SKILL.md** with `click_element` and verification workflow notes.
 - [ ] Tag v0.5.0 on completion.
 
 ### Decision criteria

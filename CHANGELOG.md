@@ -10,11 +10,14 @@ All notable changes to openclaw-vnc-control. Format follows [Keep a Changelog](h
 - `DESIGN.md` — open-source architecture and permission model spec
 - Permission manifest concept (`vnc-permissions.json`) for multi-agent deployments
 - Audit log design for per-action accountability
+- `scripts/coord-calibration-audit.py` — synthetic marker round-trip precision audit (screenshot ↔ native)
+- `eval_florence2.py` — Florence-2 grounding evaluation scaffold
 
 ### Changed
 - `cmd_wait_for` and `cmd_assert_visible` migrated to unified `detect_element()` layer
 - Removed dead code: `_vision_find_element`, `_gemma4_detect`, `_moondream_detect` (replaced by unified layer)
 - Removed hardcoded venv path from Moondream backend
+- `cmd_click_element` now reports objective state-change metrics and supports retry-on-no-change (`--verify-retries`, `--retry-offset`)
 
 ---
 
