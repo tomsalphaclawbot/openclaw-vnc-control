@@ -56,6 +56,10 @@ NATIVE_HEIGHT = None
 STATE_DIR = Path(tempfile.gettempdir()) / "vnc-control"
 STATE_FILE = STATE_DIR / "last_capture.json"
 
+# Vision model caches (lazy-loaded)
+_moondream_model_cache = None
+_falcon_model_cache = None
+
 # ─── .env loader ──────────────────────────────────────────────────────────────
 
 def load_dotenv():
@@ -1369,7 +1373,7 @@ def cmd_assert_visible(args, config):
 # {
 #   "found":       bool,
 #   "query":       str,
-#   "backend":     str,        # "moondream" | "gemma4" | "anthropic"
+#   "backend":     str,        # "moondream" | "gemma4" | "falcon" | "anthropic"
 #   "image_size":  [w, h],     # actual image dims fed to the model
 #   "box": {                   # bounding box in screenshot-space px
 #     "x_min": int, "y_min": int,
@@ -1435,6 +1439,20 @@ def _make_detection_result(found, query, backend, image_size=None,
     return r
 
 
+def _normalize_detection_backend(backend):
+    """Map backend aliases to canonical backend names."""
+    if not backend:
+        return "moondream"
+    b = str(backend).strip().lower()
+    aliases = {
+        "remote": "anthropic",
+        "claude": "anthropic",
+        "moondream2": "moondream",
+        "falcon-perception": "falcon",
+    }
+    return aliases.get(b, b)
+
+
 def detect_element(image_path, query, backend="moondream", config=None, capture_scale=None):
     """
     UNIFIED entry point for element detection across all vision backends.
@@ -1442,7 +1460,7 @@ def detect_element(image_path, query, backend="moondream", config=None, capture_
     Args:
         image_path:    path to the screenshot (must be the EXACT image the model will see)
         query:         natural language description of the element
-        backend:       "moondream" | "gemma4" | "anthropic"
+        backend:       "moondream" | "gemma4" | "falcon" | "anthropic"
         config:        VNC config dict (used if native coord conversion is needed by caller)
         capture_scale: scale used to produce image_path from native resolution
                        (stored in result for caller to use with resolve_native_coords)
@@ -1451,13 +1469,19 @@ def detect_element(image_path, query, backend="moondream", config=None, capture_
     Caller converts center to native: resolve_native_coords(r["center"]["x"], r["center"]["y"],
                                           "screenshot", config, scale=capture_scale)
     """
+    backend = _normalize_detection_backend(backend)
     result = None
     if backend == "gemma4":
         result = _detect_gemma4(image_path, query)
+    elif backend == "falcon":
+        result = _detect_falcon(image_path, query)
     elif backend == "anthropic":
         result = _detect_anthropic(image_path, query)
-    else:
+    elif backend == "moondream":
         result = _detect_moondream(image_path, query)
+    else:
+        result = _make_detection_result(False, query, backend,
+                                        error=f"Unsupported backend '{backend}'. Use one of: moondream, gemma4, falcon, anthropic")
 
     if capture_scale is not None:
         result["capture_scale"] = capture_scale
@@ -1591,6 +1615,134 @@ def _detect_gemma4(image_path, query, model_id=None):
                                   note=parsed.get("note"), elapsed_s=elapsed)
 
 
+def _load_falcon_model(model_id):
+    """Lazy-load Falcon Perception model for local detection."""
+    from transformers import AutoModelForCausalLM
+    import torch
+
+    global _falcon_model_cache
+    if _falcon_model_cache is not None and _falcon_model_cache.get("model_id") == model_id:
+        return _falcon_model_cache["model"], 0.0, _falcon_model_cache.get("device", "cpu")
+
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        device = "mps"
+    elif torch.cuda.is_available():
+        device = "cuda:0"
+    else:
+        device = "cpu"
+
+    t0 = time.time()
+    kwargs = {
+        "trust_remote_code": True,
+    }
+    if device != "cpu":
+        kwargs["torch_dtype"] = torch.float16
+    try:
+        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+    except Exception:
+        # Retry without explicit dtype for compatibility with custom model code.
+        model = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)
+
+    if hasattr(model, "to"):
+        model = model.to(device)
+    if hasattr(model, "eval"):
+        model = model.eval()
+
+    _falcon_model_cache = {"model": model, "model_id": model_id, "device": device}
+    return model, (time.time() - t0), device
+
+
+def _detect_falcon(image_path, query, model_id=None):
+    """Falcon Perception local inference (open-vocabulary grounding/segmentation)."""
+    try:
+        from PIL import Image
+        import time as _time
+    except ImportError as e:
+        return _make_detection_result(False, query, "falcon", error=f"Missing dep: {e}")
+
+    model_id = model_id or FALCON_MODEL
+
+    try:
+        img = Image.open(image_path).convert("RGB")
+        w, h = img.size
+    except Exception as e:
+        return _make_detection_result(False, query, "falcon", error=f"Image load failed: {e}")
+
+    try:
+        model, t_load, device = _load_falcon_model(model_id)
+    except Exception as e:
+        err_txt = str(e)
+        if "triton" in err_txt.lower():
+            guidance = (
+                "Falcon backend unavailable: upstream Falcon-Perception runtime requires 'triton'. "
+                "On Apple Silicon/macOS this dependency is typically unavailable. "
+                "Run Falcon on Linux/CUDA (with triton installed) or use moondream/gemma4 locally."
+            )
+        else:
+            guidance = (
+                "Falcon backend unavailable. Setup: pip install 'torch>=2.5' transformers pillow einops pycocotools; "
+                "ensure model access to tiiuae/Falcon-Perception. "
+                "On Apple Silicon, use a PyTorch build with MPS enabled."
+            )
+        return _make_detection_result(False, query, "falcon",
+                                      image_size=(w, h),
+                                      error=err_txt,
+                                      note=guidance)
+
+    t0 = _time.time()
+    try:
+        generated = model.generate(img, query, compile=FALCON_COMPILE)
+    except TypeError:
+        # Some model revisions may not accept compile kwarg.
+        generated = model.generate(img, query)
+    except Exception as e:
+        return _make_detection_result(False, query, "falcon",
+                                      image_size=(w, h), error=str(e),
+                                      elapsed_s=_time.time() - t0)
+
+    elapsed = _time.time() - t0
+    preds = generated
+    if isinstance(preds, list) and preds and isinstance(preds[0], list):
+        preds = preds[0]
+
+    if not preds:
+        return _make_detection_result(False, query, "falcon",
+                                      image_size=(w, h), elapsed_s=elapsed + t_load,
+                                      note="No matching instances returned")
+
+    first = preds[0]
+    xy = first.get("xy") if isinstance(first, dict) else None
+    hw = first.get("hw") if isinstance(first, dict) else None
+    if not isinstance(xy, dict) or not isinstance(hw, dict):
+        return _make_detection_result(False, query, "falcon",
+                                      image_size=(w, h), elapsed_s=elapsed + t_load,
+                                      error="Falcon output missing xy/hw",
+                                      raw_extra=str(first)[:300])
+
+    x = float(xy.get("x", 0.0))
+    y = float(xy.get("y", 0.0))
+    bw = max(0.0, float(hw.get("w", 0.0)))
+    bh = max(0.0, float(hw.get("h", 0.0)))
+
+    # Falcon provides normalized center (xy) + normalized size (hw).
+    x_min_n = max(0.0, min(1.0, x - (bw / 2.0)))
+    y_min_n = max(0.0, min(1.0, y - (bh / 2.0)))
+    x_max_n = max(0.0, min(1.0, x + (bw / 2.0)))
+    y_max_n = max(0.0, min(1.0, y + (bh / 2.0)))
+
+    box = {
+        "x_min": x_min_n * w,
+        "y_min": y_min_n * h,
+        "x_max": x_max_n * w,
+        "y_max": y_max_n * h,
+    }
+    return _make_detection_result(True, query, "falcon",
+                                  image_size=(w, h), box=box,
+                                  confidence="medium",
+                                  note=f"device={device}; instances={len(preds)}",
+                                  elapsed_s=elapsed + t_load)
+
+
 def _detect_anthropic(image_path, query, model_id=None):
     """Anthropic vision API. Best reasoning quality; has API cost."""
     import base64 as _b64, json as _json, time, urllib.request
@@ -1669,11 +1821,14 @@ def _detect_anthropic(image_path, query, model_id=None):
 
 GEMMA4_ENDPOINT = os.environ.get("GEMMA4_ENDPOINT", "http://127.0.0.1:8890")
 GEMMA4_MODEL = "mlx-community/gemma-4-26b-a4b-it-4bit"
+FALCON_MODEL = os.environ.get("FALCON_MODEL", "tiiuae/Falcon-Perception")
+FALCON_COMPILE = os.environ.get("FALCON_COMPILE", "0").strip().lower() in ("1", "true", "yes", "on")
 
 def cmd_click_element(args, config):
     """
     Phase 8b: click_element — find a UI element by natural language, click its center.
-    Uses Moondream2 locally (no API call, ~4-8s). Falls back to remote vision API if unavailable.
+    Uses local vision backends (moondream/gemma4/falcon) or Anthropic API.
+    Falls back to remote Anthropic when local detection fails.
 
     COORDINATE PIPELINE (critical — must stay in sync):
       VNC native res (e.g. 3420x2214 on this host)
@@ -1686,6 +1841,7 @@ def cmd_click_element(args, config):
     Known issue: different models may return coords in different spaces:
       - Moondream2: returns px coords in the image fed to it (screenshot-space) ✓
       - Gemma4: returns normalized 0-1 floats → we convert to px using image dims ✓
+      - Falcon Perception: returns normalized center+size; converted to px ✓
       - Remote Anthropic vision: returns px coords in the image fed to it ✓
     The actual image dims are always checked at detection time, not assumed.
     See docs/vision-models.md for full details.
@@ -1704,7 +1860,7 @@ def cmd_click_element(args, config):
     tmp_img = convert_screenshot(raw_png, tmp_img, fmt="jpeg", scale=capture_scale, quality=quality)
 
     # 2. Detect element using unified detection layer
-    backend = getattr(args, "backend", "moondream")
+    backend = _normalize_detection_backend(getattr(args, "backend", "moondream"))
     detection = detect_element(tmp_img, description, backend=backend,
                                config=config, capture_scale=capture_scale)
 
@@ -2610,6 +2766,8 @@ def main():
     p = sub.add_parser("find_element", help="[Phase 7] Locate a UI element using vision model")
     p.add_argument("description", help="Natural language description of element to find (e.g. 'Save button', 'username input field')")
     p.add_argument("--model", default=None, help="Vision model to use (default: claude-opus-4-5 or $VNC_VISION_MODEL)")
+    p.add_argument("--backend", choices=["anthropic", "moondream", "gemma4", "falcon", "remote"], default="anthropic",
+                   help="Detection backend: anthropic (API), moondream/gemma4/falcon (local), remote=anthropic alias")
     p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None)
     p.add_argument("--scale", type=float, default=None)
     p.add_argument("--quality", type=int, default=None)
@@ -2620,6 +2778,8 @@ def main():
     p.add_argument("--timeout", type=float, default=30, help="Max wait time in seconds (default: 30)")
     p.add_argument("--interval", type=float, default=2.0, help="Poll interval in seconds (default: 2.0)")
     p.add_argument("--model", default=None, help="Vision model to use (default: claude-opus-4-5 or $VNC_VISION_MODEL)")
+    p.add_argument("--backend", choices=["anthropic", "moondream", "gemma4", "falcon", "remote"], default="anthropic",
+                   help="Detection backend: anthropic (API), moondream/gemma4/falcon (local), remote=anthropic alias")
     p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None)
     p.add_argument("--scale", type=float, default=None)
     p.add_argument("--quality", type=int, default=None)
@@ -2628,6 +2788,8 @@ def main():
     p = sub.add_parser("assert_visible", help="[Phase 7] Assert an element/text is visible (exit 0=found, 1=not found)")
     p.add_argument("description", help="Natural language description of element to verify")
     p.add_argument("--model", default=None, help="Vision model to use (default: claude-opus-4-5 or $VNC_VISION_MODEL)")
+    p.add_argument("--backend", choices=["anthropic", "moondream", "gemma4", "falcon", "remote"], default="anthropic",
+                   help="Detection backend: anthropic (API), moondream/gemma4/falcon (local), remote=anthropic alias")
     p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None)
     p.add_argument("--scale", type=float, default=None)
     p.add_argument("--quality", type=int, default=None)
@@ -2739,12 +2901,12 @@ def main():
 
     # click_element - Phase 8b local vision (Moondream2)
     p = sub.add_parser("click_element",
-        help="[Phase 8b] Find a UI element by natural language and click it (Moondream2 local, no API)")
+        help="[Phase 8b] Find a UI element by natural language and click it (local vision or Anthropic API)")
     p.add_argument("description", help="Natural language description of the element to click")
     p.add_argument("--button", choices=["left", "right", "middle"], default="left")
     p.add_argument("--double", action="store_true", help="Double-click")
-    p.add_argument("--backend", choices=["moondream", "gemma4", "remote"], default="moondream",
-                   help="Vision backend: moondream (local ~5s), gemma4 (local server ~5s, better reasoning), remote (Anthropic API)")
+    p.add_argument("--backend", choices=["moondream", "gemma4", "falcon", "anthropic", "remote"], default="moondream",
+                   help="Vision backend: moondream (local), gemma4 (local server), falcon (local grounding), anthropic/remote (API)")
 
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
