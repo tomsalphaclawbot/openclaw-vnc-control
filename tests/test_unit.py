@@ -270,118 +270,142 @@ class TestSha1File:
 
 
 # ---------------------------------------------------------------------------
-# Phase 7: Vision-Assisted Automation — _vision_find_element unit tests
+# Phase 7+: Unified detection layer (dispatch, parsing, Falcon support)
 # ---------------------------------------------------------------------------
 
-class TestVisionFindElement:
-    """Unit tests for _vision_find_element — mock the API, test parsing logic."""
+class TestDetectElementDispatch:
+    def test_backend_aliases(self):
+        assert vnc._normalize_detection_backend("remote") == "anthropic"
+        assert vnc._normalize_detection_backend("claude") == "anthropic"
+        assert vnc._normalize_detection_backend("moondream2") == "moondream"
+        assert vnc._normalize_detection_backend("falcon-perception") == "falcon"
+
+    def test_dispatch_routes_to_expected_backend(self, monkeypatch, tmp_path):
+        img = tmp_path / "dispatch.jpg"
+        img.write_bytes(b"fake")
+
+        calls = []
+
+        def _stub(name):
+            def inner(*args, **kwargs):
+                calls.append(name)
+                return {"found": False, "backend": name}
+            return inner
+
+        monkeypatch.setattr(vnc, "_detect_moondream", _stub("moondream"))
+        monkeypatch.setattr(vnc, "_detect_gemma4", _stub("gemma4"))
+        monkeypatch.setattr(vnc, "_detect_anthropic", _stub("anthropic"))
+        monkeypatch.setattr(vnc, "_detect_falcon", _stub("falcon"))
+
+        vnc.detect_element(str(img), "button", backend="moondream")
+        vnc.detect_element(str(img), "button", backend="gemma4")
+        vnc.detect_element(str(img), "button", backend="anthropic")
+        vnc.detect_element(str(img), "button", backend="remote")
+        vnc.detect_element(str(img), "button", backend="falcon")
+
+        assert calls == ["moondream", "gemma4", "anthropic", "anthropic", "falcon"]
+
+    def test_unknown_backend_returns_error(self, tmp_path):
+        img = tmp_path / "unknown.jpg"
+        img.write_bytes(b"fake")
+        result = vnc.detect_element(str(img), "button", backend="nope")
+        assert result["found"] is False
+        assert "Unsupported backend" in result["error"]
+
+
+class TestDetectAnthropic:
+    def _img(self, tmp_path):
+        from PIL import Image
+        img = tmp_path / "anthropic.jpg"
+        Image.new("RGB", (320, 200), color="white").save(img)
+        return img
 
     def test_missing_api_key_returns_error(self, monkeypatch, tmp_path):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        img = tmp_path / "test.jpg"
-        img.write_bytes(b"fake-jpeg-data")
-        result = vnc._vision_find_element(str(img), "save button")
+        result = vnc._detect_anthropic(str(self._img(tmp_path)), "save button")
         assert result["found"] is False
         assert "ANTHROPIC_API_KEY" in result["error"]
 
-    def test_valid_json_response_parsed(self, monkeypatch, tmp_path):
-        """Mock the urlopen to return a valid JSON vision response."""
-        import io
+    def test_parses_fenced_json(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        img = self._img(tmp_path)
 
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
-        img = tmp_path / "test.jpg"
-        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)  # minimal fake JPEG header
-
-        vision_payload = {
-            "content": [{"text": '{"found": true, "x": 142.5, "y": 87.0, "confidence": "high", "reasoning": "Save button found top right", "bounding_box": {"x1": 120, "y1": 75, "x2": 165, "y2": 99}}'}]
+        payload = {
+            "content": [{
+                "text": "```json\n{\"found\": true, \"x_min\": 10, \"y_min\": 20, \"x_max\": 110, \"y_max\": 60, \"confidence\": \"high\", \"note\": \"ok\"}\n```"
+            }]
         }
 
         class FakeResp:
             def read(self):
-                return json.dumps(vision_payload).encode()
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
+                return json.dumps(payload).encode()
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
 
-        monkeypatch.setattr(vnc.urllib.request, "urlopen", lambda *a, **kw: FakeResp())
+        monkeypatch.setattr(vnc.urllib.request, "urlopen", lambda *a, **k: FakeResp())
 
-        result = vnc._vision_find_element(str(img), "save button")
+        result = vnc._detect_anthropic(str(img), "save button")
         assert result["found"] is True
-        assert result["x"] == 142.5
-        assert result["y"] == 87.0
-        assert result["confidence"] == "high"
-        assert result["bounding_box"]["x1"] == 120
+        assert result["backend"] == "anthropic"
+        assert result["center"]["x"] == 60
+        assert result["center"]["y"] == 40
 
-    def test_element_not_found_response(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
-        img = tmp_path / "test.jpg"
-        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
 
-        vision_payload = {
-            "content": [{"text": '{"found": false, "x": null, "y": null, "confidence": "high", "reasoning": "No save button visible", "bounding_box": null}'}]
-        }
+class TestVisionCliBackendOptions:
+    def test_click_element_help_lists_falcon_backend(self):
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "click_element", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        assert "--backend" in result.stdout
+        assert "falcon" in result.stdout
 
-        class FakeResp:
-            def read(self): return json.dumps(vision_payload).encode()
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
+    def test_find_element_help_lists_backend_flag(self):
+        result = subprocess.run(
+            [sys.executable, str(_SCRIPT), "find_element", "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        assert "--backend" in result.stdout
+        assert "anthropic" in result.stdout
 
-        monkeypatch.setattr(vnc.urllib.request, "urlopen", lambda *a, **kw: FakeResp())
 
-        result = vnc._vision_find_element(str(img), "save button")
-        assert result["found"] is False
-        assert result["x"] is None
+class TestDetectFalcon:
+    def _img(self, tmp_path):
+        from PIL import Image
+        img = tmp_path / "falcon.jpg"
+        Image.new("RGB", (400, 240), color="gray").save(img)
+        return img
 
-    def test_markdown_fenced_json_stripped(self, monkeypatch, tmp_path):
-        """Vision model sometimes wraps JSON in ```json fences — should still parse."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
-        img = tmp_path / "test.jpg"
-        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+    def test_converts_xy_hw_to_bbox_and_center(self, monkeypatch, tmp_path):
+        class FakeModel:
+            def generate(self, *args, **kwargs):
+                return [[{"xy": {"x": 0.5, "y": 0.5}, "hw": {"w": 0.25, "h": 0.5}}]]
 
-        fenced = '```json\n{"found": true, "x": 50.0, "y": 60.0, "confidence": "medium", "reasoning": "OK", "bounding_box": null}\n```'
-        vision_payload = {"content": [{"text": fenced}]}
+        monkeypatch.setattr(vnc, "_load_falcon_model", lambda model_id: (FakeModel(), 0.0, "mps"))
 
-        class FakeResp:
-            def read(self): return json.dumps(vision_payload).encode()
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-
-        monkeypatch.setattr(vnc.urllib.request, "urlopen", lambda *a, **kw: FakeResp())
-
-        result = vnc._vision_find_element(str(img), "button")
+        result = vnc._detect_falcon(str(self._img(tmp_path)), "button")
         assert result["found"] is True
-        assert result["x"] == 50.0
+        assert result["backend"] == "falcon"
+        assert result["box"]["x_min"] == 150
+        assert result["box"]["x_max"] == 250
+        assert result["box"]["y_min"] == 60
+        assert result["box"]["y_max"] == 180
+        assert result["center"]["x"] == 200
+        assert result["center"]["y"] == 120
 
-    def test_malformed_json_returns_error(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
-        img = tmp_path / "test.jpg"
-        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+    def test_model_load_failure_returns_setup_guidance(self, monkeypatch, tmp_path):
+        def fail(_):
+            raise RuntimeError("torch not installed")
 
-        vision_payload = {"content": [{"text": "This is not JSON at all, sorry"}]}
-
-        class FakeResp:
-            def read(self): return json.dumps(vision_payload).encode()
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-
-        monkeypatch.setattr(vnc.urllib.request, "urlopen", lambda *a, **kw: FakeResp())
-
-        result = vnc._vision_find_element(str(img), "button")
+        monkeypatch.setattr(vnc, "_load_falcon_model", fail)
+        result = vnc._detect_falcon(str(self._img(tmp_path)), "button")
         assert result["found"] is False
-        assert "parse failed" in result["error"].lower() or "error" in result
-
-    def test_api_exception_returns_error(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
-        img = tmp_path / "test.jpg"
-        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
-
-        def raise_error(*a, **kw):
-            raise Exception("network timeout")
-
-        monkeypatch.setattr(vnc.urllib.request, "urlopen", raise_error)
-
-        result = vnc._vision_find_element(str(img), "button")
-        assert result["found"] is False
-        assert "network timeout" in result["error"]
+        assert "torch not installed" in result["error"]
+        assert "Falcon backend unavailable" in (result.get("note") or "")
 
 
 # ---------------------------------------------------------------------------

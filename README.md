@@ -168,6 +168,7 @@ Native VNC coords      (used for move + click commands)
 |-------|--------------|----------------|
 | Moondream2 | px in image fed to it (screenshot-space) | `resolve_native_coords(x, y, "screenshot", scale=capture_scale)` |
 | Gemma 4 (local) | normalized 0-1 floats | multiply by image dims → screenshot px → same as above |
+| Falcon Perception (local) | normalized center+size (`xy` + `hw`) | convert to normalized bbox → screenshot px → same as above |
 | Anthropic remote | px in image fed to it (screenshot-space) | same as Moondream2 |
 
 All paths go through the same `resolve_native_coords()` function. Adding a new model? Make sure it reports in one of these formats and route through the same function.
@@ -186,6 +187,7 @@ All paths go through the same `resolve_native_coords()` function. Adding a new m
 | **Gemma 4 normalized coords require image dims at parse time** | ✅ **HANDLED** | `_gemma4_detect()` opens the image with PIL to get actual dims before converting 0-1 floats to px. Never assume image dims. |
 | **Scale drift if profile changes** | ⚠️ **KNOWN** | If `--profile` or `--scale` changes between screenshot and coord interpretation, clicks will be off. `cmd_click_element` records `capture_scale` from `capture_settings()` and passes it to `resolve_native_coords()` — do not hardcode `SCALE = 0.5` in new code. |
 | **Moondream2 hallucinates absent elements** | ⚠️ **KNOWN** | Moondream2 will sometimes return a bounding box for an element that doesn't exist (e.g., returned coords for "close button" on a dialog that has none). Gemma 4 correctly returns `found: false` in the same case. Prefer Gemma 4 (`--backend gemma4`) for precision work. |
+| **Falcon Perception on Apple Silicon requires Triton** | ⚠️ **BLOCKED LOCALLY** | Falcon backend is integrated, but upstream `tiiuae/Falcon-Perception` currently hard-requires `triton` at model load. On macOS/Apple Silicon this dependency is typically unavailable, so backend returns explicit setup guidance and fails cleanly. |
 | **Florence-2 not yet benchmarked** | 🧪 **SCAFFOLD READY** | `eval_florence2.py` added to run local open-vocabulary detection probes. Still pending click-lab accuracy + latency benchmarking before backend integration. |
 
 See [`docs/vision-models.md`](./docs/vision-models.md) for full model comparison.
@@ -345,7 +347,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full version history.
 
 | Version | Highlights |
 |---------|------------|
-| **0.5.0** | Unified `detect_element()` layer · canonical `DetectionResult` schema · `click_element` command · Moondream2 + Gemma4 local vision backends · multi-backend `--backend` flag |
+| **0.5.0** | Unified `detect_element()` layer · canonical `DetectionResult` schema · `click_element` command · Moondream2 + Gemma4 + Falcon backend routing · multi-backend `--backend` flag |
 | **0.4.0** | Workflow engine (YAML/JSON, retry, hooks) · OCR · clipboard · macro record/play · annotation · image diff · scroll/drag · vision-assisted `find_element` / `wait_for` / `assert_visible` |
 | **0.3.0** | Multi-session support · HTTP API server (FastAPI) |
 | **0.2.0** | Session daemon · Click Lab (22/22 accuracy) · lock screen detection · coordinate spaces · `normalize_key_name()` |
