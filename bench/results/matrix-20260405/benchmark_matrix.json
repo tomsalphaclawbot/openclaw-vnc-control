@@ -1,0 +1,649 @@
+{
+  "generated_at": "2026-04-05T23:26:43.139360+00:00",
+  "fixture_path": "/Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json",
+  "image_path": "/Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture-click-lab.png",
+  "config": {
+    "backends": [
+      "moondream",
+      "gemma4",
+      "anthropic",
+      "falcon",
+      "florence2",
+      "sam2"
+    ],
+    "max_positive": 8,
+    "max_negative": 2,
+    "allow_model_download": false,
+    "florence_model": "microsoft/Florence-2-base-ft",
+    "falcon_model": "tiiuae/falcon-11b-vision-instruct",
+    "gemma_endpoint": "http://127.0.0.1:8890"
+  },
+  "cases": [
+    {
+      "case_id": "pos-agent_input",
+      "query": "input field labeled \"agent_input text field\"",
+      "expected_found": true,
+      "expected_center": [
+        269.0,
+        294.0
+      ],
+      "label": "agent_input text field",
+      "kind": "input"
+    },
+    {
+      "case_id": "pos-agent_text_field",
+      "query": "input field labeled \"agent_text_field textarea\"",
+      "expected_found": true,
+      "expected_center": [
+        269.0,
+        385.0
+      ],
+      "label": "agent_text_field textarea",
+      "kind": "textarea"
+    },
+    {
+      "case_id": "pos-focus_agent_input",
+      "query": "button labeled \"Focus agent_input\"",
+      "expected_found": true,
+      "expected_center": [
+        153.5,
+        231.0
+      ],
+      "label": "Focus agent_input",
+      "kind": "button"
+    },
+    {
+      "case_id": "pos-focus_agent_text_field",
+      "query": "button labeled \"Focus agent_text_field\"",
+      "expected_found": true,
+      "expected_center": [
+        384.5,
+        231.0
+      ],
+      "label": "Focus agent_text_field",
+      "kind": "button"
+    },
+    {
+      "case_id": "pos-nav_density",
+      "query": "button labeled \"Density\"",
+      "expected_found": true,
+      "expected_center": [
+        415.9141,
+        20.0
+      ],
+      "label": "Density",
+      "kind": "nav-link"
+    },
+    {
+      "case_id": "pos-nav_dynamic",
+      "query": "button labeled \"Dynamic\"",
+      "expected_found": true,
+      "expected_center": [
+        481.7578,
+        20.0
+      ],
+      "label": "Dynamic",
+      "kind": "nav-link"
+    },
+    {
+      "case_id": "pos-nav_forms",
+      "query": "button labeled \"Forms\"",
+      "expected_found": true,
+      "expected_center": [
+        245.6719,
+        20.0
+      ],
+      "label": "Forms",
+      "kind": "nav-link"
+    },
+    {
+      "case_id": "pos-nav_grid__easy_",
+      "query": "button labeled \"Grid (Easy)\"",
+      "expected_found": true,
+      "expected_center": [
+        176.5859,
+        20.0
+      ],
+      "label": "Grid (Easy)",
+      "kind": "nav-link"
+    },
+    {
+      "case_id": "neg-no-such-grid-button",
+      "query": "button labeled \"OBSIDIAN BANANA\"",
+      "expected_found": false,
+      "expected_center": null,
+      "label": null,
+      "kind": null
+    },
+    {
+      "case_id": "neg-no-such-icon-button",
+      "query": "icon button labeled \"Teleport\"",
+      "expected_found": false,
+      "expected_center": null,
+      "label": null,
+      "kind": null
+    }
+  ],
+  "probes": {
+    "moondream": {
+      "backend": "moondream",
+      "runnable": true,
+      "reason_class": "ok",
+      "reason": "transformers + torch available",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends moondream --max-positive 1 --max-negative 0",
+      "next_steps": []
+    },
+    "gemma4": {
+      "backend": "gemma4",
+      "runnable": true,
+      "reason_class": "ok",
+      "reason": "Gemma endpoint reachable at http://127.0.0.1:8890/v1/models",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends gemma4 --max-positive 1 --max-negative 0",
+      "next_steps": []
+    },
+    "anthropic": {
+      "backend": "anthropic",
+      "runnable": false,
+      "reason_class": "missing_api_key",
+      "reason": "ANTHROPIC_API_KEY is not set",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends anthropic --max-positive 1 --max-negative 0",
+      "next_steps": [
+        "export ANTHROPIC_API_KEY=<your-key>",
+        "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends anthropic --max-positive 1 --max-negative 0"
+      ]
+    },
+    "falcon": {
+      "backend": "falcon",
+      "runnable": false,
+      "reason_class": "missing_model",
+      "reason": "Model not cached locally: tiiuae/falcon-11b-vision-instruct",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends falcon --max-positive 1 --max-negative 0",
+      "next_steps": [
+        "python3 - <<'PY'\nfrom huggingface_hub import snapshot_download\nsnapshot_download('tiiuae/falcon-11b-vision-instruct')\nPY",
+        "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends falcon --max-positive 1 --max-negative 0"
+      ]
+    },
+    "florence2": {
+      "backend": "florence2",
+      "runnable": false,
+      "reason_class": "missing_model",
+      "reason": "Model not cached locally: microsoft/Florence-2-base-ft",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends florence2 --max-positive 1 --max-negative 0",
+      "next_steps": [
+        "python3 - <<'PY'\nfrom huggingface_hub import snapshot_download\nsnapshot_download('microsoft/Florence-2-base-ft')\nPY",
+        "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends florence2 --max-positive 1 --max-negative 0"
+      ]
+    },
+    "sam2": {
+      "backend": "sam2",
+      "runnable": false,
+      "reason_class": "missing_grounding_stack",
+      "reason": "SAM2 is a segmentation model and is not text-grounded here (requires GroundingDINO/OWL-ViT + SAM2 integration).",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends sam2 --max-positive 1 --max-negative 0",
+      "next_steps": [
+        "python3 -m pip install git+https://github.com/facebookresearch/sam2.git",
+        "python3 -m pip install groundingdino-py",
+        "Implement text\u2192box grounding stage, then feed boxes into SAM2 for mask refinement.",
+        "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends sam2 --max-positive 1 --max-negative 0"
+      ]
+    }
+  },
+  "backend_summaries": [
+    {
+      "backend": "moondream",
+      "runnable": true,
+      "attempted": 10,
+      "positive_cases": 8,
+      "negative_cases": 2,
+      "tp": 8,
+      "fn": 0,
+      "tn": 0,
+      "fp": 2,
+      "positive_recall": 1.0,
+      "negative_specificity": 0.0,
+      "median_error_px": 2.0,
+      "p95_error_px": 60.564,
+      "median_latency_s": 4.4,
+      "reason_class": "ok",
+      "reason": "transformers + torch available",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends moondream --max-positive 1 --max-negative 0",
+      "next_steps": []
+    },
+    {
+      "backend": "gemma4",
+      "runnable": true,
+      "attempted": 10,
+      "positive_cases": 8,
+      "negative_cases": 2,
+      "tp": 5,
+      "fn": 3,
+      "tn": 2,
+      "fp": 0,
+      "positive_recall": 0.625,
+      "negative_specificity": 1.0,
+      "median_error_px": 121.529,
+      "p95_error_px": 132.559,
+      "median_latency_s": 3.049,
+      "reason_class": "ok",
+      "reason": "Gemma endpoint reachable at http://127.0.0.1:8890/v1/models",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends gemma4 --max-positive 1 --max-negative 0",
+      "next_steps": []
+    },
+    {
+      "backend": "anthropic",
+      "runnable": false,
+      "reason_class": "missing_api_key",
+      "reason": "ANTHROPIC_API_KEY is not set",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends anthropic --max-positive 1 --max-negative 0",
+      "next_steps": [
+        "export ANTHROPIC_API_KEY=<your-key>",
+        "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends anthropic --max-positive 1 --max-negative 0"
+      ],
+      "attempted": 0
+    },
+    {
+      "backend": "falcon",
+      "runnable": false,
+      "reason_class": "missing_model",
+      "reason": "Model not cached locally: tiiuae/falcon-11b-vision-instruct",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends falcon --max-positive 1 --max-negative 0",
+      "next_steps": [
+        "python3 - <<'PY'\nfrom huggingface_hub import snapshot_download\nsnapshot_download('tiiuae/falcon-11b-vision-instruct')\nPY",
+        "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends falcon --max-positive 1 --max-negative 0"
+      ],
+      "attempted": 0
+    },
+    {
+      "backend": "florence2",
+      "runnable": false,
+      "reason_class": "missing_model",
+      "reason": "Model not cached locally: microsoft/Florence-2-base-ft",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends florence2 --max-positive 1 --max-negative 0",
+      "next_steps": [
+        "python3 - <<'PY'\nfrom huggingface_hub import snapshot_download\nsnapshot_download('microsoft/Florence-2-base-ft')\nPY",
+        "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends florence2 --max-positive 1 --max-negative 0"
+      ],
+      "attempted": 0
+    },
+    {
+      "backend": "sam2",
+      "runnable": false,
+      "reason_class": "missing_grounding_stack",
+      "reason": "SAM2 is a segmentation model and is not text-grounded here (requires GroundingDINO/OWL-ViT + SAM2 integration).",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends sam2 --max-positive 1 --max-negative 0",
+      "next_steps": [
+        "python3 -m pip install git+https://github.com/facebookresearch/sam2.git",
+        "python3 -m pip install groundingdino-py",
+        "Implement text\u2192box grounding stage, then feed boxes into SAM2 for mask refinement.",
+        "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture.json --backends sam2 --max-positive 1 --max-negative 0"
+      ],
+      "attempted": 0
+    }
+  ],
+  "rows": [
+    {
+      "backend": "moondream",
+      "case_id": "pos-agent_input",
+      "query": "input field labeled \"agent_input text field\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 18.422,
+      "status": "ok",
+      "label": "agent_input text field",
+      "kind": "input",
+      "expected_center_x": 269.0,
+      "expected_center_y": 294.0,
+      "pred_center_x": 267.0,
+      "pred_center_y": 385.0,
+      "error_px": 91.022,
+      "error_dx_px": -2.0,
+      "error_dy_px": 91.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "moondream",
+      "case_id": "pos-agent_text_field",
+      "query": "input field labeled \"agent_text_field textarea\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 4.409,
+      "status": "ok",
+      "label": "agent_text_field textarea",
+      "kind": "textarea",
+      "expected_center_x": 269.0,
+      "expected_center_y": 385.0,
+      "pred_center_x": 265.0,
+      "pred_center_y": 385.0,
+      "error_px": 4.0,
+      "error_dx_px": -4.0,
+      "error_dy_px": 0.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "moondream",
+      "case_id": "pos-focus_agent_input",
+      "query": "button labeled \"Focus agent_input\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 4.317,
+      "status": "ok",
+      "label": "Focus agent_input",
+      "kind": "button",
+      "expected_center_x": 153.5,
+      "expected_center_y": 231.0,
+      "pred_center_x": 155.0,
+      "pred_center_y": 231.0,
+      "error_px": 1.5,
+      "error_dx_px": 1.5,
+      "error_dy_px": 0.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "moondream",
+      "case_id": "pos-focus_agent_text_field",
+      "query": "button labeled \"Focus agent_text_field\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 4.398,
+      "status": "ok",
+      "label": "Focus agent_text_field",
+      "kind": "button",
+      "expected_center_x": 384.5,
+      "expected_center_y": 231.0,
+      "pred_center_x": 382.0,
+      "pred_center_y": 231.0,
+      "error_px": 2.5,
+      "error_dx_px": -2.5,
+      "error_dy_px": 0.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "moondream",
+      "case_id": "pos-nav_density",
+      "query": "button labeled \"Density\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 4.325,
+      "status": "ok",
+      "label": "Density",
+      "kind": "nav-link",
+      "expected_center_x": 415.914,
+      "expected_center_y": 20.0,
+      "pred_center_x": 416.0,
+      "pred_center_y": 19.0,
+      "error_px": 1.004,
+      "error_dx_px": 0.086,
+      "error_dy_px": -1.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "moondream",
+      "case_id": "pos-nav_dynamic",
+      "query": "button labeled \"Dynamic\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 4.536,
+      "status": "ok",
+      "label": "Dynamic",
+      "kind": "nav-link",
+      "expected_center_x": 481.758,
+      "expected_center_y": 20.0,
+      "pred_center_x": 481.0,
+      "pred_center_y": 19.0,
+      "error_px": 1.255,
+      "error_dx_px": -0.758,
+      "error_dy_px": -1.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "moondream",
+      "case_id": "pos-nav_forms",
+      "query": "button labeled \"Forms\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 4.475,
+      "status": "ok",
+      "label": "Forms",
+      "kind": "nav-link",
+      "expected_center_x": 245.672,
+      "expected_center_y": 20.0,
+      "pred_center_x": 242.0,
+      "pred_center_y": 20.0,
+      "error_px": 3.672,
+      "error_dx_px": -3.672,
+      "error_dy_px": 0.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "moondream",
+      "case_id": "pos-nav_grid__easy_",
+      "query": "button labeled \"Grid (Easy)\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 4.403,
+      "status": "ok",
+      "label": "Grid (Easy)",
+      "kind": "nav-link",
+      "expected_center_x": 176.586,
+      "expected_center_y": 20.0,
+      "pred_center_x": 177.0,
+      "pred_center_y": 19.0,
+      "error_px": 1.082,
+      "error_dx_px": 0.414,
+      "error_dy_px": -1.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "moondream",
+      "case_id": "neg-no-such-grid-button",
+      "query": "button labeled \"OBSIDIAN BANANA\"",
+      "expected_found": false,
+      "found": true,
+      "elapsed_s": 4.348,
+      "status": "ok",
+      "label": null,
+      "kind": null,
+      "pred_center_x": 1022.0,
+      "pred_center_y": 638.0,
+      "classification": "fp",
+      "confidence": "high"
+    },
+    {
+      "backend": "moondream",
+      "case_id": "neg-no-such-icon-button",
+      "query": "icon button labeled \"Teleport\"",
+      "expected_found": false,
+      "found": true,
+      "elapsed_s": 4.352,
+      "status": "ok",
+      "label": null,
+      "kind": null,
+      "pred_center_x": 1534.0,
+      "pred_center_y": 324.0,
+      "classification": "fp",
+      "confidence": "high"
+    },
+    {
+      "backend": "gemma4",
+      "case_id": "pos-agent_input",
+      "query": "input field labeled \"agent_input text field\"",
+      "expected_found": true,
+      "found": false,
+      "elapsed_s": 58.222,
+      "status": "ok",
+      "label": "agent_input text field",
+      "kind": "input",
+      "expected_center_x": 269.0,
+      "expected_center_y": 294.0,
+      "error": "The requested label 'agent_input text field' does not exist. There is an 'agent_input' field and an 'agent_text_field', but no single field with that combined label.",
+      "classification": "fn",
+      "backend_note": "The requested label 'agent_input text field' does not exist. There is an 'agent_input' field and an 'agent_text_field', but no single field with that combined label."
+    },
+    {
+      "backend": "gemma4",
+      "case_id": "pos-agent_text_field",
+      "query": "input field labeled \"agent_text_field textarea\"",
+      "expected_found": true,
+      "found": false,
+      "elapsed_s": 3.084,
+      "status": "ok",
+      "label": "agent_text_field textarea",
+      "kind": "textarea",
+      "expected_center_x": 269.0,
+      "expected_center_y": 385.0,
+      "error": "The requested element 'input field labeled \"agent_text_field textarea\"' was not found. There is a text field with the label 'agent_text_field', but it is not a textarea.",
+      "classification": "fn",
+      "backend_note": "The requested element 'input field labeled \"agent_text_field textarea\"' was not found. There is a text field with the label 'agent_text_field', but it is not a textarea."
+    },
+    {
+      "backend": "gemma4",
+      "case_id": "pos-focus_agent_input",
+      "query": "button labeled \"Focus agent_input\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 3.206,
+      "status": "ok",
+      "label": "Focus agent_input",
+      "kind": "button",
+      "expected_center_x": 153.5,
+      "expected_center_y": 231.0,
+      "pred_center_x": 154.0,
+      "pred_center_y": 228.0,
+      "error_px": 3.041,
+      "error_dx_px": 0.5,
+      "error_dy_px": -3.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "gemma4",
+      "case_id": "pos-focus_agent_text_field",
+      "query": "button labeled \"Focus agent_text_field\"",
+      "expected_found": true,
+      "found": false,
+      "elapsed_s": 2.895,
+      "status": "ok",
+      "label": "Focus agent_text_field",
+      "kind": "button",
+      "expected_center_x": 384.5,
+      "expected_center_y": 231.0,
+      "error": "The text 'Focus agent_text_field' is not a button label, but rather a label for a text field or a description of an action. There is no button with that exact label.",
+      "classification": "fn",
+      "backend_note": "The text 'Focus agent_text_field' is not a button label, but rather a label for a text field or a description of an action. There is no button with that exact label."
+    },
+    {
+      "backend": "gemma4",
+      "case_id": "pos-nav_density",
+      "query": "button labeled \"Density\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 4.079,
+      "status": "ok",
+      "label": "Density",
+      "kind": "nav-link",
+      "expected_center_x": 415.914,
+      "expected_center_y": 20.0,
+      "pred_center_x": 427.0,
+      "pred_center_y": 152.0,
+      "error_px": 132.465,
+      "error_dx_px": 11.086,
+      "error_dy_px": 132.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "gemma4",
+      "case_id": "pos-nav_dynamic",
+      "query": "button labeled \"Dynamic\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 3.014,
+      "status": "ok",
+      "label": "Dynamic",
+      "kind": "nav-link",
+      "expected_center_x": 481.758,
+      "expected_center_y": 20.0,
+      "pred_center_x": 475.0,
+      "pred_center_y": 20.0,
+      "error_px": 6.758,
+      "error_dx_px": -6.758,
+      "error_dy_px": 0.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "gemma4",
+      "case_id": "pos-nav_forms",
+      "query": "button labeled \"Forms\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 2.916,
+      "status": "ok",
+      "label": "Forms",
+      "kind": "nav-link",
+      "expected_center_x": 245.672,
+      "expected_center_y": 20.0,
+      "pred_center_x": 257.0,
+      "pred_center_y": 141.0,
+      "error_px": 121.529,
+      "error_dx_px": 11.328,
+      "error_dy_px": 121.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "gemma4",
+      "case_id": "pos-nav_grid__easy_",
+      "query": "button labeled \"Grid (Easy)\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 4.042,
+      "status": "ok",
+      "label": "Grid (Easy)",
+      "kind": "nav-link",
+      "expected_center_x": 176.586,
+      "expected_center_y": 20.0,
+      "pred_center_x": 189.0,
+      "pred_center_y": 152.0,
+      "error_px": 132.582,
+      "error_dx_px": 12.414,
+      "error_dy_px": 132.0,
+      "classification": "tp",
+      "confidence": "high"
+    },
+    {
+      "backend": "gemma4",
+      "case_id": "neg-no-such-grid-button",
+      "query": "button labeled \"OBSIDIAN BANANA\"",
+      "expected_found": false,
+      "found": false,
+      "elapsed_s": 2.199,
+      "status": "ok",
+      "label": null,
+      "kind": null,
+      "classification": "tn",
+      "backend_note": "The button 'OBSIDIAN BANANA' was not found in the provided image."
+    },
+    {
+      "backend": "gemma4",
+      "case_id": "neg-no-such-icon-button",
+      "query": "icon button labeled \"Teleport\"",
+      "expected_found": false,
+      "found": false,
+      "elapsed_s": 2.166,
+      "status": "ok",
+      "label": null,
+      "kind": null,
+      "classification": "tn",
+      "backend_note": "The icon button labeled 'Teleport' was not found in the provided image."
+    }
+  ]
+}

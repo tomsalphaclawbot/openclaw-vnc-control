@@ -103,62 +103,57 @@ Status: `TODO` | `IN_PROGRESS` | `DONE` | `BLOCKED`
 - **vncdotool**: Mature CLI/lib but no structured output, not agent-oriented
 - **Result**: No existing tool provides standalone VNC bridge for AI agent loops. Gap confirmed.
 
-## Sprint I — Vision Backend Benchmark Suite 🟡 NEXT
+## Sprint I — Vision Backend Benchmark Suite ✅ PARTIAL COMPLETE (2026-04-05)
 
-**Goal:** Systematic, reproducible comparison of all detection backends against the Click Lab. Before open-sourcing, anyone choosing a backend should have real data, not anecdotes.
+**Goal:** Systematic, reproducible comparison of all detection backends against the Click Lab. Before open-sourcing, backend selection should be driven by measured data.
 
-**Test fixture:** `labs/vnc-click-lab/` — 22 named buttons in a 6×4 grid, known `xPct`/`yPct` ground-truth positions, existing log API. Already proven 22/22 by human-clicking. Now run all backends against it.
+**Measured run:** `bench/results/matrix-20260405/`
+- Fixture: `fixture.json` + `fixture-click-lab.png`
+- Matrix artifacts: `benchmark_matrix.json`, `benchmark_matrix.csv`, `benchmark_matrix.md`
+- Cases: 10 total (8 positive + 2 negative)
 
 ### Subtasks
 
 #### I-1: Click Lab — start + health check script
-- [ ] Script `bench/start_click_lab.sh` — launch `npm run dev` in lab dir, wait for port 3000 ready, open in browser via `open` command
-- [ ] Verify lab is visible and navigable from a VNC screenshot
-- [ ] Document how to position/size the browser window deterministically for consistent coordinates
+- [x] Script `bench/start_click_lab.sh` (port-aware launcher, health wait, PID/log output)
+- [x] Verified fixture app at `http://127.0.0.1:3015/vnc-click-lab`
+- [x] Deterministic viewport in fixture capture (`1710x913`) via Playwright screenshot flow
 
 #### I-2: Ground truth fixture
-- [ ] Script `bench/ground_truth.py` — fetches button positions from the running lab page (parse `xPct`/`yPct` from JS or a `/api/buttons` endpoint we add)
-- [ ] Alternatively: hardcode the 22 button positions in a `bench/fixtures.json` from the known grid formula (`startX=40, endX=90, startY=22, endY=88, cols=6, rows=4`)
-- [ ] Output: `{"btn-1": {"label": "ATLAS PLUM", "x_pct": 40.0, "y_pct": 22.0}, ...}`
+- [x] Script `bench/capture_fixture.py` captures screenshot + pulls `/api/element-coords` snapshot
+- [x] Output includes per-element center px + normalized center + metadata
+- [x] Fixture committed at `bench/results/matrix-20260405/fixture.json`
 
 #### I-3: Benchmark runner
-- [ ] Script `bench/run_benchmark.py` — for each backend × each button:
-  1. Take screenshot of the lab
-  2. Call `detect_element(image, f'button labeled {label}', backend=backend)`
-  3. Compare detected center (normalized) vs ground truth (xPct/yPct)
-  4. Record: found (bool), error_px, error_pct, elapsed_s, confidence
-- [ ] Backends to test: `moondream`, `gemma4`, `anthropic`
-- [ ] Output: `bench/results/YYYY-MM-DD-HH-MM-{backend}.json`
+- [x] Script `bench/run_benchmark_matrix.py` executes backend × case matrix against fixture
+- [x] Backends in matrix: `moondream`, `gemma4`, `anthropic`, `falcon`, `florence2`, `sam2`
+- [x] Runnable in this environment: `moondream`, `gemma4`
+- [x] Non-runnable backends are recorded with `reason_class`, concrete `reason`, dry-run command, and next steps
 
 #### I-4: Metrics + report
-- [ ] Script `bench/report.py` — reads results JSON(s), outputs:
-  - Per-backend: accuracy (% found), median error_px, p95 error_px, median latency, total cost (for remote backends)
-  - Per-button: which buttons each model struggled with (small text? similar colors? edge positions?)
-  - Markdown table for README
-- [ ] First-pass target: `moondream` and `anthropic` baselines (Gemma4 needs server running)
+- [x] Per-backend metrics emitted: positive recall, negative specificity, median/p95 px error, median latency
+- [x] Machine-readable + human-readable outputs emitted (`json`, `csv`, `md`)
+- [x] First-pass measured ranking documented in `docs/vision-models.md`
 
 #### I-5: Extend Click Lab with more element types
-- [ ] Add a text input field (test: "type in the search box")
-- [ ] Add a dropdown / select element
-- [ ] Add small icon buttons (stress test for small targets)
-- [ ] Add two visually similar buttons with different labels (hardest case)
-- [ ] Goal: test beyond rectangular colored buttons into realistic UI diversity
+- [ ] Existing lab already includes forms/icons/modals/dynamic pages; matrix currently run on `/vnc-click-lab` fixture only
+- [ ] Follow-up: add fixture captures for forms/icons/modals and rerun matrix across those pages
 
 #### I-6: Integrate results into docs
-- [ ] Add benchmark results table to `docs/vision-models.md`
-- [ ] Update README with "Benchmark results" section linking to full data
-- [ ] Add `bench/README.md` explaining how to reproduce
+- [x] Added benchmark table + recommendation ordering to `docs/vision-models.md`
+- [x] Added `bench/README.md` reproducibility runbook
+- [x] Added README benchmark section linking artifacts
 
 #### I-7: CI smoke (optional, if remote backend available)
-- [ ] Add a lightweight single-button detection test to CI using a static screenshot fixture
-- [ ] Tests the detection pipeline without needing live VNC or a running browser
+- [x] Added unit tests for matrix harness logic: `tests/test_benchmark_matrix.py`
+- [ ] Optional: wire static fixture smoke into CI pipeline
 
-### Definition of done
-- All three backends benchmarked against all 22 buttons
-- Metrics: accuracy %, median px error, p95 px error, median latency
-- Results committed to `bench/results/`
-- `docs/vision-models.md` updated with the data
-- `bench/README.md` explains how to reproduce
+### Definition of done (current state)
+- [x] Reproducible harness + fixture pipeline implemented
+- [x] Runnable backends benchmarked with structured artifacts
+- [x] Docs updated with measured data and backend ordering
+- [ ] Full cross-page fixture matrix (forms/icons/modals/density/dynamic)
+- [ ] Anthropic/falcon/florence measured rows once credentials/models are available
 
 ---
 
