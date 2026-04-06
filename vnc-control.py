@@ -1197,6 +1197,85 @@ def cmd_connect(args, config):
 
 # ─── Phase 7: Vision-Assisted Automation ─────────────────────────────────────
 
+def _vision_find_element(image_path, description, model=None):
+    """
+    Legacy Anthropic-only detector kept for compatibility with older tests/callers.
+
+    Returns the historical schema:
+      {found, x, y, confidence, reasoning, bounding_box}
+    where x/y/bounding_box are screenshot-space pixels.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return {"found": False, "error": "ANTHROPIC_API_KEY not set in env"}
+
+    with open(image_path, "rb") as f:
+        img_b64 = base64.b64encode(f.read()).decode()
+
+    ext = Path(image_path).suffix.lower()
+    media_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
+    used_model = model or "claude-opus-4-5"
+
+    prompt = (
+        "You are a precise UI element locator. Your task is to find a specific UI element "
+        "in this screenshot and return its center coordinates.\n\n"
+        f"ELEMENT TO FIND: {description}\n\n"
+        "Respond ONLY with a JSON object (no markdown, no explanation outside JSON) with these fields:\n"
+        "- found: boolean — true if element is visible, false if not\n"
+        "- x: float — center x pixel coordinate in the screenshot (null if not found)\n"
+        "- y: float — center y pixel coordinate in the screenshot (null if not found)\n"
+        "- confidence: string — 'high', 'medium', or 'low'\n"
+        "- reasoning: string — one sentence explaining what you found and where\n"
+        "- bounding_box: object with x1,y1,x2,y2 pixel coords, or null if not found\n\n"
+        "Be precise. Use actual pixel coordinates from the image."
+    )
+
+    payload = {
+        "model": used_model,
+        "max_tokens": 512,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": img_b64,
+                    },
+                },
+                {"type": "text", "text": prompt},
+            ],
+        }],
+    }
+
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(payload).encode(),
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+    except Exception as e:
+        return {"found": False, "error": f"Vision API call failed: {e}"}
+
+    try:
+        text = result["content"][0]["text"].strip()
+        if text.startswith("```"):
+            text = "\n".join(text.split("\n")[1:])
+            if text.endswith("```"):
+                text = text[: text.rfind("```")].strip()
+        return json.loads(text)
+    except Exception as e:
+        raw_text = result.get("content", [{}])[0].get("text", "")
+        return {"found": False, "error": f"Vision response parse failed: {e}", "raw": raw_text}
+
 def cmd_find_element(args, config):
     """
     Phase 7: find_element — locate a UI element using vision model.
