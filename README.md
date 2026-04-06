@@ -186,7 +186,7 @@ All paths go through the same `resolve_native_coords()` function. Adding a new m
 | **Gemma 4 normalized coords require image dims at parse time** | ✅ **HANDLED** | `_gemma4_detect()` opens the image with PIL to get actual dims before converting 0-1 floats to px. Never assume image dims. |
 | **Scale drift if profile changes** | ⚠️ **KNOWN** | If `--profile` or `--scale` changes between screenshot and coord interpretation, clicks will be off. `cmd_click_element` records `capture_scale` from `capture_settings()` and passes it to `resolve_native_coords()` — do not hardcode `SCALE = 0.5` in new code. |
 | **Moondream2 hallucinates absent elements** | ⚠️ **KNOWN** | Moondream2 will sometimes return a bounding box for an element that doesn't exist (e.g., returned coords for "close button" on a dialog that has none). Gemma 4 correctly returns `found: false` in the same case. Prefer Gemma 4 (`--backend gemma4`) for precision work. |
-| **Florence-2 not yet evaluated** | 🔲 **TODO** | Florence-2 (~232M) uses `<OPEN_VOCABULARY_DETECTION>` tokens natively. Should be faster than Moondream2 on CPU. Sprint H task. |
+| **Florence-2 not yet benchmarked** | 🧪 **SCAFFOLD READY** | `eval_florence2.py` added to run local open-vocabulary detection probes. Still pending click-lab accuracy + latency benchmarking before backend integration. |
 
 See [`docs/vision-models.md`](./docs/vision-models.md) for full model comparison.
 
@@ -272,6 +272,7 @@ The canonical click/typing/key test app lives here:
 - `scripts/click-regression.py` (automated 22-button sweep validator)
 - `scripts/input-key-regression.py` (automated field-input + keystroke coverage)
 - `scripts/click-calibrator.py` (builds request(native) → actual(native) calibration from telemetry)
+- `scripts/coord-calibration-audit.py` (synthetic marker round-trip audit for screenshot↔native math)
 - `scripts/run-all-regressions.sh` (one-shot runner)
 
 ### Agent runbook: spin up lab + run tests
@@ -329,6 +330,14 @@ python3 scripts/click-calibrator.py \
 ```
 
 This writes `state/click-calibration.json` with affine correction coefficients and fit-error stats.
+
+Run synthetic coordinate audit (no live VNC required):
+
+```bash
+python3 scripts/coord-calibration-audit.py --scale 0.5 --out /tmp/coord-audit.json
+```
+
+This reports objective round-trip metrics (`median_error_native_px`, `p95_error_native_px`, `max_error_native_px`) and pass/fail against a configurable threshold.
 
 ## History
 

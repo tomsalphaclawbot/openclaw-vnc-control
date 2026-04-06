@@ -62,6 +62,12 @@ python3 scripts/click-calibrator.py \
   --log-path /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/labs/vnc-click-lab/logs/vnc-click-events.jsonl
 ```
 
+```bash
+python3 scripts/coord-calibration-audit.py \
+  --scale 0.5 \
+  --out /tmp/coord-audit.json
+```
+
 ## One-shot runner
 
 ```bash

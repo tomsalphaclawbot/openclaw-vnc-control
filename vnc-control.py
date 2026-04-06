@@ -1665,6 +1665,63 @@ def _detect_anthropic(image_path, query, model_id=None):
                                   note=parsed.get("note"), elapsed_s=elapsed)
 
 
+def compute_image_change_metrics(before_path, after_path, threshold=10):
+    """Compute objective image-change metrics between two screenshots."""
+    from PIL import Image
+    import numpy as np
+
+    img_a = Image.open(before_path).convert("RGB")
+    img_b = Image.open(after_path).convert("RGB")
+
+    if img_a.size != img_b.size:
+        img_b = img_b.resize(img_a.size, Image.LANCZOS)
+
+    w, h = img_a.size
+    arr_a = np.array(img_a, dtype=np.int32)
+    arr_b = np.array(img_b, dtype=np.int32)
+
+    diff = np.abs(arr_b - arr_a)
+    diff_max = diff.max(axis=2)
+    mask = diff_max >= max(0, min(255, int(threshold)))
+
+    changed_pixels = int(mask.sum())
+    total_pixels = w * h
+    change_pct = round(changed_pixels / total_pixels * 100, 4) if total_pixels else 0
+
+    bbox = None
+    if changed_pixels > 0:
+        rows = np.any(mask, axis=1)
+        cols = np.any(mask, axis=0)
+        row_idxs = np.where(rows)[0]
+        col_idxs = np.where(cols)[0]
+        rmin, rmax = int(row_idxs[0]), int(row_idxs[-1])
+        cmin, cmax = int(col_idxs[0]), int(col_idxs[-1])
+        bbox = {
+            "x": cmin,
+            "y": rmin,
+            "x2": cmax,
+            "y2": rmax,
+            "width": cmax - cmin + 1,
+            "height": rmax - rmin + 1,
+        }
+
+    mean_diff = {
+        "r": round(float(diff[:, :, 0].mean()), 3),
+        "g": round(float(diff[:, :, 1].mean()), 3),
+        "b": round(float(diff[:, :, 2].mean()), 3),
+    }
+
+    return {
+        "changed_pixels": changed_pixels,
+        "total_pixels": total_pixels,
+        "change_pct": change_pct,
+        "changed": changed_pixels > 0,
+        "bounding_box": bbox,
+        "mean_diff_per_channel": mean_diff,
+        "image_size": {"width": w, "height": h},
+    }
+
+
 # ─── Phase 8b: Local Vision — Moondream2 + Gemma4 click_element ────────────
 
 GEMMA4_ENDPOINT = os.environ.get("GEMMA4_ENDPOINT", "http://127.0.0.1:8890")
@@ -1704,7 +1761,8 @@ def cmd_click_element(args, config):
     tmp_img = convert_screenshot(raw_png, tmp_img, fmt="jpeg", scale=capture_scale, quality=quality)
 
     # 2. Detect element using unified detection layer
-    backend = getattr(args, "backend", "moondream")
+    backend_requested = getattr(args, "backend", "moondream")
+    backend = "anthropic" if backend_requested == "remote" else backend_requested
     detection = detect_element(tmp_img, description, backend=backend,
                                config=config, capture_scale=capture_scale)
 
@@ -1735,23 +1793,120 @@ def cmd_click_element(args, config):
     btn = getattr(args, "button", "left")
     double = getattr(args, "double", False)
 
-    verify_png = tmpfile("click-element-verify", "png")
-    click_actions = ["move", str(native_x), str(native_y),
-                     "click", "d1" if double else "1",
-                     "capture", verify_png]
-    ok2, _, click_err, _ = run_vncdo(config, click_actions)
+    # 4. Click + verify state change (with optional retries).
+    button_map = {"left": "1", "right": "3", "middle": "2"}
+    button_code = button_map.get(btn, "1")
 
-    result_json(ok2 or True,  # capture timeout is OK; click likely landed
-                data={
-                    "action": "click_element",
-                    "description": description,
-                    "detection": detection,
-                    "click_coords": {"x": cx, "y": cy, "space": "screenshot"},
-                    "capture_scale": capture_scale,
-                    "native_res": {"w": native_w, "h": native_h},
-                    "native_coords": {"x": native_x, "y": native_y},
-                    "screenshot": tmp_img,
-                })
+    verify_threshold = max(0, min(255, int(getattr(args, "verify_threshold", 10))))
+    verify_min_change_pct = max(0.0, float(getattr(args, "verify_min_change_pct", 0.03)))
+    verify_retries = max(0, int(getattr(args, "verify_retries", 0)))
+    retry_offset = max(1, int(getattr(args, "retry_offset", 8)))
+    require_state_change = bool(getattr(args, "require_state_change", False))
+
+    offsets = [
+        (0, 0),
+        (retry_offset, 0),
+        (-retry_offset, 0),
+        (0, retry_offset),
+        (0, -retry_offset),
+        (retry_offset, retry_offset),
+        (-retry_offset, retry_offset),
+        (retry_offset, -retry_offset),
+        (-retry_offset, -retry_offset),
+    ]
+    offsets = offsets[: (verify_retries + 1)]
+
+    attempts = []
+    final_verify_image = None
+    state_changed = False
+    any_click_ok = False
+    last_click_err = ""
+
+    for idx, (dx, dy) in enumerate(offsets, start=1):
+        click_x = max(0, min(native_w - 1, native_x + dx))
+        click_y = max(0, min(native_h - 1, native_y + dy))
+
+        verify_png = tmpfile(f"click-element-verify-{idx}", "png")
+        click_actions = ["move", str(click_x), str(click_y), "click", button_code]
+        if double:
+            click_actions += ["pause", "0.1", "click", button_code]
+        click_actions += ["pause", "0.2", "capture", verify_png]
+
+        ok2, _, click_err, _ = run_vncdo(config, click_actions)
+        any_click_ok = any_click_ok or ok2
+        last_click_err = (click_err or "").strip()
+
+        attempt = {
+            "attempt": idx,
+            "native_coords": {"x": click_x, "y": click_y},
+            "offset_native": {"x": click_x - native_x, "y": click_y - native_y},
+            "click_ok": ok2,
+        }
+        if click_err:
+            attempt["stderr"] = click_err.strip()[-240:]
+
+        if os.path.exists(verify_png):
+            verify_jpg = tmpfile(f"click-element-verify-{idx}", "jpg")
+            verify_jpg = convert_screenshot(verify_png, verify_jpg, fmt="jpeg", scale=capture_scale, quality=quality)
+            attempt["verify_image"] = get_image_info(verify_jpg)
+            final_verify_image = attempt["verify_image"]
+
+            try:
+                metrics = compute_image_change_metrics(tmp_img, verify_jpg, threshold=verify_threshold)
+                attempt["change"] = {
+                    "change_pct": metrics["change_pct"],
+                    "changed_pixels": metrics["changed_pixels"],
+                    "total_pixels": metrics["total_pixels"],
+                    "bounding_box": metrics["bounding_box"],
+                }
+                attempt["state_changed"] = metrics["change_pct"] >= verify_min_change_pct
+                if attempt["state_changed"]:
+                    state_changed = True
+            except Exception as e:
+                attempt["change_error"] = str(e)
+
+        attempts.append(attempt)
+
+        if state_changed:
+            break
+        if not ok2:
+            break
+
+    data = {
+        "action": "click_element",
+        "description": description,
+        "backend_requested": backend_requested,
+        "backend_used": detection.get("backend", backend),
+        "detection": detection,
+        "click_coords": {"x": cx, "y": cy, "space": "screenshot"},
+        "capture_scale": capture_scale,
+        "native_res": {"w": native_w, "h": native_h},
+        "native_coords": {"x": native_x, "y": native_y},
+        "screenshot": tmp_img,
+        "verify_image": final_verify_image,
+        "verification": {
+            "threshold": verify_threshold,
+            "min_change_pct": verify_min_change_pct,
+            "retries": verify_retries,
+            "retry_offset": retry_offset,
+            "state_changed": state_changed,
+            "attempts": attempts,
+        },
+    }
+
+    if require_state_change and not state_changed:
+        result_json(False,
+                    error=(
+                        f"Click executed but state change < {verify_min_change_pct}% "
+                        f"after {len(attempts)} attempt(s)"
+                    ),
+                    data=data)
+        return
+
+    if any_click_ok:
+        result_json(True, data=data)
+    else:
+        result_json(False, error=f"Click failed: {last_click_err}", data=data)
 
 
 def cmd_status(args, config):
@@ -2743,8 +2898,18 @@ def main():
     p.add_argument("description", help="Natural language description of the element to click")
     p.add_argument("--button", choices=["left", "right", "middle"], default="left")
     p.add_argument("--double", action="store_true", help="Double-click")
-    p.add_argument("--backend", choices=["moondream", "gemma4", "remote"], default="moondream",
-                   help="Vision backend: moondream (local ~5s), gemma4 (local server ~5s, better reasoning), remote (Anthropic API)")
+    p.add_argument("--backend", choices=["moondream", "gemma4", "anthropic", "remote"], default="moondream",
+                   help="Vision backend: moondream (local ~5s), gemma4 (local server ~5s), anthropic/remote (Anthropic API)")
+    p.add_argument("--verify-threshold", type=int, default=10,
+                   help="Pixel diff threshold for post-click state-change detection (0-255, default: 10)")
+    p.add_argument("--verify-min-change-pct", type=float, default=0.03,
+                   help="Minimum change percent to consider click state-changed (default: 0.03)")
+    p.add_argument("--verify-retries", type=int, default=0,
+                   help="Retries with offset clicks when no state change is detected (default: 0)")
+    p.add_argument("--retry-offset", type=int, default=8,
+                   help="Retry offset in native pixels for click jitter (default: 8)")
+    p.add_argument("--require-state-change", action="store_true",
+                   help="Fail command if state change remains below threshold after all attempts")
 
     p = sub.add_parser("sessions", help="List or inspect named sessions from sessions.json")
     p.add_argument("subaction", nargs="?", choices=["list", "show"], default="list",
