@@ -1999,7 +1999,8 @@ def cmd_click_element(args, config):
     tmp_img = convert_screenshot(raw_png, tmp_img, fmt="jpeg", scale=capture_scale, quality=quality)
 
     # 2. Detect element using unified detection layer
-    backend = _normalize_detection_backend(getattr(args, "backend", "moondream"))
+    backend_requested = getattr(args, "backend", "moondream")
+    backend = _normalize_detection_backend(backend_requested)
     detection = detect_element(tmp_img, description, backend=backend,
                                config=config, capture_scale=capture_scale)
 
