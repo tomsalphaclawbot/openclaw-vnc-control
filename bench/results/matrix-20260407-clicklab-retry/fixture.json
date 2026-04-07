@@ -1,0 +1,761 @@
+{
+  "generated_at": "2026-04-07T17:49:34.737862+00:00",
+  "run_id": "matrix-20260407-clicklab-retry",
+  "source": {
+    "base_url": "http://127.0.0.1:3015",
+    "page": "/vnc-click-lab",
+    "coords_url": "http://127.0.0.1:3015/api/element-coords"
+  },
+  "image": {
+    "path": "/Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/bench/results/matrix-20260407-clicklab-retry/fixture-click-lab.png",
+    "width": 1710,
+    "height": 913,
+    "viewport": "1710,913"
+  },
+  "window_metrics": {
+    "screenX": 0,
+    "screenY": 0,
+    "innerWidth": 1710,
+    "innerHeight": 913,
+    "outerWidth": 1710,
+    "outerHeight": 913,
+    "devicePixelRatio": 1,
+    "scrollX": 0,
+    "scrollY": 0
+  },
+  "captured_at": "2026-04-07T17:49:32.937Z",
+  "received_at": "2026-04-07T17:49:33.007Z",
+  "elements": [
+    {
+      "id": "focus_agent_input",
+      "label": "Focus agent_input",
+      "kind": "button",
+      "center_px": {
+        "x": 153.5,
+        "y": 231.0
+      },
+      "center_norm": {
+        "x": 0.089766,
+        "y": 0.253012
+      },
+      "rect": {
+        "top": 219,
+        "left": 42,
+        "right": 265,
+        "bottom": 243,
+        "width": 223,
+        "height": 24
+      }
+    },
+    {
+      "id": "focus_agent_text_field",
+      "label": "Focus agent_text_field",
+      "kind": "button",
+      "center_px": {
+        "x": 384.5,
+        "y": 231.0
+      },
+      "center_norm": {
+        "x": 0.224854,
+        "y": 0.253012
+      },
+      "rect": {
+        "top": 219,
+        "left": 273,
+        "right": 496,
+        "bottom": 243,
+        "width": 223,
+        "height": 24
+      }
+    },
+    {
+      "id": "report_coords_btn",
+      "label": "Report Coords",
+      "kind": "button",
+      "center_px": {
+        "x": 1351.0781,
+        "y": 137.0
+      },
+      "center_norm": {
+        "x": 0.790104,
+        "y": 0.150055
+      },
+      "rect": {
+        "top": 121,
+        "left": 1287.1563,
+        "right": 1415,
+        "bottom": 153,
+        "width": 127.8438,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-1",
+      "label": "QUIET LASER",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 687.3906,
+        "y": 326.2188
+      },
+      "center_norm": {
+        "x": 0.401983,
+        "y": 0.357304
+      },
+      "rect": {
+        "top": 310.2188,
+        "left": 634.0156,
+        "right": 740.7656,
+        "bottom": 342.2188,
+        "width": 106.75,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-10",
+      "label": "SILVER JUNGLE",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1190.1875,
+        "y": 482.4531
+      },
+      "center_norm": {
+        "x": 0.696016,
+        "y": 0.528426
+      },
+      "rect": {
+        "top": 466.4531,
+        "left": 1129.4844,
+        "right": 1250.8906,
+        "bottom": 498.4531,
+        "width": 121.4063,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-11",
+      "label": "BRISK CANYON",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1357.7969,
+        "y": 482.4531
+      },
+      "center_norm": {
+        "x": 0.794033,
+        "y": 0.528426
+      },
+      "rect": {
+        "top": 466.4531,
+        "left": 1298.0391,
+        "right": 1417.5547,
+        "bottom": 498.4531,
+        "width": 119.5156,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-12",
+      "label": "MAGNET OCEAN",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1525.3906,
+        "y": 482.4531
+      },
+      "center_norm": {
+        "x": 0.892041,
+        "y": 0.528426
+      },
+      "rect": {
+        "top": 466.4531,
+        "left": 1462.2578,
+        "right": 1588.5234,
+        "bottom": 498.4531,
+        "width": 126.2656,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-13",
+      "label": "RAPID SAND",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 687.3906,
+        "y": 638.6719
+      },
+      "center_norm": {
+        "x": 0.401983,
+        "y": 0.699531
+      },
+      "rect": {
+        "top": 622.6719,
+        "left": 636.4688,
+        "right": 738.3125,
+        "bottom": 654.6719,
+        "width": 101.8438,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-14",
+      "label": "EMBER BLOOM",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 855.0,
+        "y": 638.6719
+      },
+      "center_norm": {
+        "x": 0.5,
+        "y": 0.699531
+      },
+      "rect": {
+        "top": 622.6719,
+        "left": 796.6328,
+        "right": 913.3672,
+        "bottom": 654.6719,
+        "width": 116.7344,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-15",
+      "label": "MIDNIGHT BANJO",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1022.5938,
+        "y": 638.6719
+      },
+      "center_norm": {
+        "x": 0.598008,
+        "y": 0.699531
+      },
+      "rect": {
+        "top": 622.6719,
+        "left": 954.7656,
+        "right": 1090.4219,
+        "bottom": 654.6719,
+        "width": 135.6563,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-16",
+      "label": "TINY SATURN",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1190.1875,
+        "y": 638.6719
+      },
+      "center_norm": {
+        "x": 0.696016,
+        "y": 0.699531
+      },
+      "rect": {
+        "top": 622.6719,
+        "left": 1135.6797,
+        "right": 1244.6953,
+        "bottom": 654.6719,
+        "width": 109.0156,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-17",
+      "label": "PLASMA KOALA",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1357.7969,
+        "y": 638.6719
+      },
+      "center_norm": {
+        "x": 0.794033,
+        "y": 0.699531
+      },
+      "rect": {
+        "top": 622.6719,
+        "left": 1296.5625,
+        "right": 1419.0313,
+        "bottom": 654.6719,
+        "width": 122.4688,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-18",
+      "label": "COPPER WAVE",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1525.3906,
+        "y": 638.6719
+      },
+      "center_norm": {
+        "x": 0.892041,
+        "y": 0.699531
+      },
+      "rect": {
+        "top": 622.6719,
+        "left": 1467.9219,
+        "right": 1582.8594,
+        "bottom": 654.6719,
+        "width": 114.9375,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-19",
+      "label": "NEON PEBBLE",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 687.3906,
+        "y": 794.9063
+      },
+      "center_norm": {
+        "x": 0.401983,
+        "y": 0.870653
+      },
+      "rect": {
+        "top": 778.9063,
+        "left": 631.6484,
+        "right": 743.1328,
+        "bottom": 810.9063,
+        "width": 111.4844,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-2",
+      "label": "MANGO CIRCUIT",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 855.0,
+        "y": 326.2188
+      },
+      "center_norm": {
+        "x": 0.5,
+        "y": 0.357304
+      },
+      "rect": {
+        "top": 310.2188,
+        "left": 791.1094,
+        "right": 918.8906,
+        "bottom": 342.2188,
+        "width": 127.7813,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-20",
+      "label": "GHOST PEPPER",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 855.0,
+        "y": 794.9063
+      },
+      "center_norm": {
+        "x": 0.5,
+        "y": 0.870653
+      },
+      "rect": {
+        "top": 778.9063,
+        "left": 794.5469,
+        "right": 915.4531,
+        "bottom": 810.9063,
+        "width": 120.9063,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-21",
+      "label": "CRISP ROCKET",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1022.5938,
+        "y": 794.9063
+      },
+      "center_norm": {
+        "x": 0.598008,
+        "y": 0.870653
+      },
+      "rect": {
+        "top": 778.9063,
+        "left": 964.0547,
+        "right": 1081.1328,
+        "bottom": 810.9063,
+        "width": 117.0781,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-22",
+      "label": "MARBLE PULSE",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1190.1875,
+        "y": 794.9063
+      },
+      "center_norm": {
+        "x": 0.696016,
+        "y": 0.870653
+      },
+      "rect": {
+        "top": 778.9063,
+        "left": 1130.125,
+        "right": 1250.25,
+        "bottom": 810.9063,
+        "width": 120.125,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-3",
+      "label": "NOVA PAPER",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1022.5938,
+        "y": 326.2188
+      },
+      "center_norm": {
+        "x": 0.598008,
+        "y": 0.357304
+      },
+      "rect": {
+        "top": 310.2188,
+        "left": 970.5781,
+        "right": 1074.6094,
+        "bottom": 342.2188,
+        "width": 104.0313,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-4",
+      "label": "RUSTY COMET",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1190.1875,
+        "y": 326.2188
+      },
+      "center_norm": {
+        "x": 0.696016,
+        "y": 0.357304
+      },
+      "rect": {
+        "top": 310.2188,
+        "left": 1132.2656,
+        "right": 1248.1094,
+        "bottom": 342.2188,
+        "width": 115.8438,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-5",
+      "label": "VELVET SPARK",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1357.7969,
+        "y": 326.2188
+      },
+      "center_norm": {
+        "x": 0.794033,
+        "y": 0.357304
+      },
+      "rect": {
+        "top": 310.2188,
+        "left": 1299.3984,
+        "right": 1416.1953,
+        "bottom": 342.2188,
+        "width": 116.7969,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-6",
+      "label": "TANGO FROST",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1525.3906,
+        "y": 326.2188
+      },
+      "center_norm": {
+        "x": 0.892041,
+        "y": 0.357304
+      },
+      "rect": {
+        "top": 310.2188,
+        "left": 1468.4609,
+        "right": 1582.3203,
+        "bottom": 342.2188,
+        "width": 113.8594,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-7",
+      "label": "ATLAS PLUM",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 687.3906,
+        "y": 482.4531
+      },
+      "center_norm": {
+        "x": 0.401983,
+        "y": 0.528426
+      },
+      "rect": {
+        "top": 466.4531,
+        "left": 635.5391,
+        "right": 739.2422,
+        "bottom": 498.4531,
+        "width": 103.7031,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-8",
+      "label": "PIXEL THUNDER",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 855.0,
+        "y": 482.4531
+      },
+      "center_norm": {
+        "x": 0.5,
+        "y": 0.528426
+      },
+      "rect": {
+        "top": 466.4531,
+        "left": 792.4141,
+        "right": 917.5859,
+        "bottom": 498.4531,
+        "width": 125.1719,
+        "height": 32
+      }
+    },
+    {
+      "id": "btn-9",
+      "label": "VIOLET ANCHOR",
+      "kind": "grid-button",
+      "center_px": {
+        "x": 1022.5938,
+        "y": 482.4531
+      },
+      "center_norm": {
+        "x": 0.598008,
+        "y": 0.528426
+      },
+      "rect": {
+        "top": 466.4531,
+        "left": 958.5938,
+        "right": 1086.5938,
+        "bottom": 498.4531,
+        "width": 128,
+        "height": 32
+      }
+    },
+    {
+      "id": "agent_input",
+      "label": "agent_input text field",
+      "kind": "input",
+      "center_px": {
+        "x": 269.0,
+        "y": 294.0
+      },
+      "center_norm": {
+        "x": 0.15731,
+        "y": 0.322015
+      },
+      "rect": {
+        "top": 279,
+        "left": 42,
+        "right": 496,
+        "bottom": 309,
+        "width": 454,
+        "height": 30
+      }
+    },
+    {
+      "id": "nav_density",
+      "label": "Density",
+      "kind": "nav-link",
+      "center_px": {
+        "x": 415.9141,
+        "y": 20.0
+      },
+      "center_norm": {
+        "x": 0.243225,
+        "y": 0.021906
+      },
+      "rect": {
+        "top": 8,
+        "left": 386.5625,
+        "right": 445.2656,
+        "bottom": 32,
+        "width": 58.7031,
+        "height": 24
+      }
+    },
+    {
+      "id": "nav_dynamic",
+      "label": "Dynamic",
+      "kind": "nav-link",
+      "center_px": {
+        "x": 481.7578,
+        "y": 20.0
+      },
+      "center_norm": {
+        "x": 0.28173,
+        "y": 0.021906
+      },
+      "rect": {
+        "top": 8,
+        "left": 449.2656,
+        "right": 514.25,
+        "bottom": 32,
+        "width": 64.9844,
+        "height": 24
+      }
+    },
+    {
+      "id": "nav_forms",
+      "label": "Forms",
+      "kind": "nav-link",
+      "center_px": {
+        "x": 245.6719,
+        "y": 20.0
+      },
+      "center_norm": {
+        "x": 0.143668,
+        "y": 0.021906
+      },
+      "rect": {
+        "top": 8,
+        "left": 219.9844,
+        "right": 271.3594,
+        "bottom": 32,
+        "width": 51.375,
+        "height": 24
+      }
+    },
+    {
+      "id": "nav_grid__easy_",
+      "label": "Grid (Easy)",
+      "kind": "nav-link",
+      "center_px": {
+        "x": 176.5859,
+        "y": 20.0
+      },
+      "center_norm": {
+        "x": 0.103267,
+        "y": 0.021906
+      },
+      "rect": {
+        "top": 8,
+        "left": 137.1875,
+        "right": 215.9844,
+        "bottom": 32,
+        "width": 78.7969,
+        "height": 24
+      }
+    },
+    {
+      "id": "nav_home",
+      "label": "Home",
+      "kind": "nav-link",
+      "center_px": {
+        "x": 108.5391,
+        "y": 20.0
+      },
+      "center_norm": {
+        "x": 0.063473,
+        "y": 0.021906
+      },
+      "rect": {
+        "top": 8,
+        "left": 83.8906,
+        "right": 133.1875,
+        "bottom": 32,
+        "width": 49.2969,
+        "height": 24
+      }
+    },
+    {
+      "id": "nav_icons",
+      "label": "Icons",
+      "kind": "nav-link",
+      "center_px": {
+        "x": 298.5156,
+        "y": 20.0
+      },
+      "center_norm": {
+        "x": 0.174571,
+        "y": 0.021906
+      },
+      "rect": {
+        "top": 8,
+        "left": 275.3594,
+        "right": 321.6719,
+        "bottom": 32,
+        "width": 46.3125,
+        "height": 24
+      }
+    },
+    {
+      "id": "nav_modals",
+      "label": "Modals",
+      "kind": "nav-link",
+      "center_px": {
+        "x": 354.1172,
+        "y": 20.0
+      },
+      "center_norm": {
+        "x": 0.207086,
+        "y": 0.021906
+      },
+      "rect": {
+        "top": 8,
+        "left": 325.6719,
+        "right": 382.5625,
+        "bottom": 32,
+        "width": 56.8906,
+        "height": 24
+      }
+    },
+    {
+      "id": "agent_text_field",
+      "label": "agent_text_field textarea",
+      "kind": "textarea",
+      "center_px": {
+        "x": 269.0,
+        "y": 385.0
+      },
+      "center_norm": {
+        "x": 0.15731,
+        "y": 0.421687
+      },
+      "rect": {
+        "top": 345,
+        "left": 42,
+        "right": 496,
+        "bottom": 425,
+        "width": 454,
+        "height": 80
+      }
+    }
+  ],
+  "negative_queries": [
+    {
+      "id": "neg-no-such-grid-button",
+      "query": "button labeled \"OBSIDIAN BANANA\"",
+      "expected_found": false
+    },
+    {
+      "id": "neg-no-such-icon-button",
+      "query": "icon button labeled \"Teleport\"",
+      "expected_found": false
+    },
+    {
+      "id": "neg-no-such-input",
+      "query": "input field named \"ghost_field\"",
+      "expected_found": false
+    }
+  ]
+}

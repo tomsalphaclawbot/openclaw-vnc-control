@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-DEFAULT_BACKENDS = ["moondream", "gemma4", "anthropic", "florence2", "falcon", "sam31"]
+DEFAULT_BACKENDS = ["auto", "moondream", "gemma4", "anthropic", "florence2", "falcon", "sam31"]
 
 
 @dataclass
@@ -182,6 +182,16 @@ def probe_backend(
         f"python3 bench/run_benchmark_matrix.py --fixture {fixture_path} "
         f"--backends {backend} --max-positive 1 --max-negative 0"
     )
+
+    if backend == "auto":
+        return Probe(
+            backend,
+            True,
+            "ok",
+            "auto chain is runtime-configured via vnc-control.py",
+            dry_run,
+            [],
+        )
 
     if backend == "gemma4":
         endpoint = gemma_endpoint.rstrip("/")
@@ -858,7 +868,7 @@ def run_backend_case(
 ) -> dict[str, Any]:
     start = time.time()
     try:
-        if backend in {"moondream", "gemma4", "anthropic", "falcon"}:
+        if backend in {"auto", "moondream", "gemma4", "anthropic", "falcon"}:
             result = vnc_module.detect_element(str(image_path), case.query, backend=backend)
         elif backend == "florence2":
             result = run_florence2_detector(image_path, case.query, florence_state, florence_model, allow_model_download)
