@@ -7,7 +7,8 @@ Backends:
 - anthropic (vnc-control integrated, API key required)
 - florence2 (optional local HF backend)
 - falcon (optional local HF backend)
-- sam2 (classification-only unless a full grounding stack is wired)
+- sam31 (optional local MLX backend)
+- sam2 (legacy placeholder; not text-grounded in this harness)
 
 Outputs written to --out-dir:
 - benchmark_matrix.json
@@ -33,7 +34,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-DEFAULT_BACKENDS = ["moondream", "gemma4", "anthropic", "florence2", "falcon", "sam2"]
+DEFAULT_BACKENDS = ["moondream", "gemma4", "anthropic", "florence2", "falcon", "sam31"]
 
 
 @dataclass
@@ -167,9 +168,12 @@ def build_cases(fixture: dict[str, Any], max_positive: int, max_negative: int) -
 def probe_backend(
     backend: str,
     fixture_path: Path,
+    image_path: Path,
+    vnc_module: Any,
     allow_model_download: bool,
     florence_model: str,
     falcon_model: str,
+    sam31_model: str,
     gemma_endpoint: str,
 ) -> Probe:
     dry_run = (
@@ -275,15 +279,16 @@ def probe_backend(
         try:
             import transformers  # noqa: F401
             import torch  # noqa: F401
+            import triton  # noqa: F401
         except Exception as exc:
             return Probe(
                 backend,
                 False,
-                "missing_dependency",
-                f"Falcon backend requires transformers + torch: {exc}",
+                "runtime_incompatible",
+                f"Falcon backend requires transformers + torch + triton: {exc}",
                 dry_run,
                 [
-                    "python3 -m pip install 'transformers>=4.46.0' torch pillow",
+                    "python3 -m pip install 'transformers>=4.46.0' torch pillow triton",
                     f"python3 - <<'PY'\nfrom huggingface_hub import snapshot_download\nsnapshot_download('{falcon_model}')\nPY",
                     dry_run,
                 ],
@@ -291,11 +296,46 @@ def probe_backend(
 
         cached = model_cached(falcon_model)
         if cached or allow_model_download:
+            # Execute a one-shot runtime smoke via vnc-control to catch platform/runtime failures
+            # (for example macOS arm64 + triton/flex-attention incompatibilities).
+            try:
+                smoke = vnc_module.detect_element(str(image_path), "button", backend="falcon")
+                smoke_err = str(smoke.get("error", "") or "")
+                if smoke_err:
+                    reason_class = "runtime_incompatible" if any(
+                        tok in smoke_err.lower() for tok in ["triton", "mps", "cuda", "flexattention", "dynamo"]
+                    ) else "runtime_error"
+                    return Probe(
+                        backend,
+                        False,
+                        reason_class,
+                        f"Falcon runtime smoke failed: {smoke_err}",
+                        dry_run,
+                        [
+                            "Prefer Linux/CUDA runtime for Falcon-Perception.",
+                            "On this host, use moondream/gemma4/SAM3.1 for local benchmarking.",
+                            dry_run,
+                        ],
+                    )
+            except Exception as exc:
+                return Probe(
+                    backend,
+                    False,
+                    "runtime_error",
+                    f"Falcon runtime smoke crashed: {exc}",
+                    dry_run,
+                    [
+                        "Re-run falcon-only dry run and inspect traceback.",
+                        dry_run,
+                    ],
+                )
+
             return Probe(
                 backend,
                 True,
                 "ok",
-                "Falcon dependencies available" + (" (cached)" if cached else " (download allowed)"),
+                "Falcon deps/model available and runtime smoke passed"
+                + (" (cached)" if cached else " (download allowed)"),
                 dry_run,
                 [],
             )
@@ -309,6 +349,49 @@ def probe_backend(
                 f"python3 - <<'PY'\nfrom huggingface_hub import snapshot_download\nsnapshot_download('{falcon_model}')\nPY",
                 dry_run,
             ],
+        )
+
+    if backend == "sam31":
+        try:
+            import numpy  # noqa: F401
+            from mlx_vlm.utils import get_model_path  # noqa: F401
+            from mlx_vlm.models.sam3.generate import Sam3Predictor  # noqa: F401
+            from mlx_vlm.models.sam3_1.processing_sam3_1 import Sam31Processor  # noqa: F401
+        except Exception as exc:
+            return Probe(
+                backend,
+                False,
+                "missing_dependency",
+                f"SAM3.1 backend requires mlx_vlm + sam3_1 modules: {exc}",
+                dry_run,
+                [
+                    "Use the gemma4-mlx environment with mlx_vlm installed.",
+                    "pip install mlx-vlm",
+                    dry_run,
+                ],
+            )
+
+        cached = model_cached(sam31_model)
+        if not (cached or allow_model_download):
+            return Probe(
+                backend,
+                False,
+                "missing_model",
+                f"Model not cached locally: {sam31_model}",
+                dry_run,
+                [
+                    f"python3 - <<'PY'\nfrom huggingface_hub import snapshot_download\nsnapshot_download('{sam31_model}')\nPY",
+                    dry_run,
+                ],
+            )
+
+        return Probe(
+            backend,
+            True,
+            "ok",
+            "SAM3.1 dependencies/model available" + (" (cached)" if cached else " (download allowed)"),
+            dry_run,
+            [],
         )
 
     if backend == "sam2":
@@ -471,6 +554,59 @@ def run_falcon_detector(
     }
 
 
+def run_sam31_detector(
+    image_path: Path,
+    query: str,
+    state: dict[str, Any],
+    model_id: str,
+    allow_model_download: bool,
+) -> dict[str, Any]:
+    import numpy as np
+    from PIL import Image
+    from mlx_vlm.utils import load_model, get_model_path
+    from mlx_vlm.models.sam3.generate import Sam3Predictor
+    from mlx_vlm.models.sam3_1.processing_sam3_1 import Sam31Processor
+
+    if "predictor" not in state:
+        if not allow_model_download and not model_cached(model_id):
+            return {
+                "found": False,
+                "backend": "sam31",
+                "error": f"Model not cached locally: {model_id}",
+                "note": "Pass --allow-model-download or prefetch model into HF cache.",
+            }
+
+        model_path = get_model_path(model_id)
+        model = load_model(model_path)
+        processor = Sam31Processor.from_pretrained(str(model_path))
+        predictor = Sam3Predictor(model, processor, score_threshold=0.2)
+        state.update({"predictor": predictor})
+
+    predictor = state["predictor"]
+    img = Image.open(image_path).convert("RGB")
+
+    t0 = time.time()
+    out = predictor.predict(img, text_prompt=query)
+    elapsed = time.time() - t0
+
+    scores = np.asarray(getattr(out, "scores", []))
+    boxes = np.asarray(getattr(out, "boxes", []))
+    if scores.size == 0 or boxes.size == 0:
+        return {"found": False, "backend": "sam31", "elapsed_s": round(elapsed, 3), "note": "no detections"}
+
+    best_idx = int(scores.argmax())
+    x1, y1, x2, y2 = [float(v) for v in boxes[best_idx].tolist()]
+    return {
+        "found": True,
+        "backend": "sam31",
+        "elapsed_s": round(elapsed, 3),
+        "center": {"x": (x1 + x2) / 2.0, "y": (y1 + y2) / 2.0},
+        "box": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
+        "confidence": float(scores[best_idx]),
+        "detections": int(scores.size),
+    }
+
+
 def extract_center(result: dict[str, Any]) -> tuple[float, float] | None:
     center = result.get("center") or result.get("center_px")
     if isinstance(center, dict) and "x" in center and "y" in center:
@@ -488,18 +624,20 @@ def run_backend_case(
     vnc_module: Any,
     florence_state: dict[str, Any],
     falcon_state: dict[str, Any],
+    sam31_state: dict[str, Any],
     florence_model: str,
     falcon_model: str,
+    sam31_model: str,
     allow_model_download: bool,
 ) -> dict[str, Any]:
     start = time.time()
     try:
-        if backend in {"moondream", "gemma4", "anthropic"}:
+        if backend in {"moondream", "gemma4", "anthropic", "falcon"}:
             result = vnc_module.detect_element(str(image_path), case.query, backend=backend)
         elif backend == "florence2":
             result = run_florence2_detector(image_path, case.query, florence_state, florence_model, allow_model_download)
-        elif backend == "falcon":
-            result = run_falcon_detector(image_path, case.query, falcon_state, falcon_model, allow_model_download)
+        elif backend == "sam31":
+            result = run_sam31_detector(image_path, case.query, sam31_state, sam31_model, allow_model_download)
         else:
             raise RuntimeError(f"Backend {backend} has no detector")
     except Exception as exc:
@@ -705,7 +843,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-negative", type=int, default=2, help="Max negative cases")
     parser.add_argument("--allow-model-download", action="store_true", help="Allow HF model downloads for optional backends")
     parser.add_argument("--florence-model", default="microsoft/Florence-2-base-ft", help="Florence model id")
-    parser.add_argument("--falcon-model", default="tiiuae/falcon-11b-vision-instruct", help="Falcon model id")
+    parser.add_argument("--falcon-model", default="tiiuae/Falcon-Perception", help="Falcon model id")
+    parser.add_argument("--sam31-model", default="mlx-community/sam3.1-bf16", help="SAM3.1 model id")
     parser.add_argument("--gemma-endpoint", default=os.environ.get("GEMMA4_ENDPOINT", "http://127.0.0.1:8890"))
     return parser.parse_args()
 
@@ -722,6 +861,15 @@ def main() -> int:
     if not image_path.is_absolute():
         image_path = (fixture_path.parent / image_path).resolve()
 
+    # Some historical fixtures captured absolute paths from ephemeral worktrees.
+    # If the absolute path no longer exists, fall back to fixture-dir basename.
+    if not image_path.exists():
+        fallback = (fixture_path.parent / Path(image_rel).name).resolve()
+        if fallback.exists():
+            image_path = fallback
+        else:
+            raise RuntimeError(f"Fixture image not found: {image_path}")
+
     backends = [b.strip() for b in args.backends.split(",") if b.strip()]
     out_dir = Path(args.out_dir).resolve() if args.out_dir else fixture_path.parent.resolve()
     ensure_dir(out_dir)
@@ -737,14 +885,18 @@ def main() -> int:
 
     florence_state: dict[str, Any] = {}
     falcon_state: dict[str, Any] = {}
+    sam31_state: dict[str, Any] = {}
 
     for backend in backends:
         probe = probe_backend(
             backend=backend,
             fixture_path=fixture_path,
+            image_path=image_path,
+            vnc_module=vnc,
             allow_model_download=args.allow_model_download,
             florence_model=args.florence_model,
             falcon_model=args.falcon_model,
+            sam31_model=args.sam31_model,
             gemma_endpoint=args.gemma_endpoint,
         )
         probes[backend] = probe
@@ -759,8 +911,10 @@ def main() -> int:
                     vnc_module=vnc,
                     florence_state=florence_state,
                     falcon_state=falcon_state,
+                    sam31_state=sam31_state,
                     florence_model=args.florence_model,
                     falcon_model=args.falcon_model,
+                    sam31_model=args.sam31_model,
                     allow_model_download=args.allow_model_download,
                 )
                 backend_rows.append(row)
@@ -779,6 +933,7 @@ def main() -> int:
             "allow_model_download": args.allow_model_download,
             "florence_model": args.florence_model,
             "falcon_model": args.falcon_model,
+            "sam31_model": args.sam31_model,
             "gemma_endpoint": args.gemma_endpoint,
         },
         "cases": [
