@@ -277,18 +277,16 @@ def probe_backend(
 
     if backend == "falcon":
         try:
-            import transformers  # noqa: F401
-            import torch  # noqa: F401
-            import triton  # noqa: F401
+            import falcon_perception  # noqa: F401
         except Exception as exc:
             return Probe(
                 backend,
                 False,
-                "runtime_incompatible",
-                f"Falcon backend requires transformers + torch + triton: {exc}",
+                "missing_dependency",
+                f"Falcon backend requires local fork runtime (falcon_perception): {exc}",
                 dry_run,
                 [
-                    "python3 -m pip install 'transformers>=4.46.0' torch pillow triton",
+                    "uv pip install -e 'projects/falcon-perception-fork[mlx]'",
                     f"python3 - <<'PY'\nfrom huggingface_hub import snapshot_download\nsnapshot_download('{falcon_model}')\nPY",
                     dry_run,
                 ],
@@ -312,8 +310,9 @@ def probe_backend(
                         f"Falcon runtime smoke failed: {smoke_err}",
                         dry_run,
                         [
-                            "Prefer Linux/CUDA runtime for Falcon-Perception.",
-                            "On this host, use moondream/gemma4/SAM3.1 for local benchmarking.",
+                            "Use local fork MLX runtime on Apple Silicon.",
+                            "Install: uv pip install -e 'projects/falcon-perception-fork[mlx]'.",
+                            "For non-MLX environments, use Linux/CUDA torch runtime.",
                             dry_run,
                         ],
                     )
@@ -843,7 +842,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-negative", type=int, default=2, help="Max negative cases")
     parser.add_argument("--allow-model-download", action="store_true", help="Allow HF model downloads for optional backends")
     parser.add_argument("--florence-model", default="microsoft/Florence-2-base-ft", help="Florence model id")
-    parser.add_argument("--falcon-model", default="tiiuae/Falcon-Perception", help="Falcon model id")
+    parser.add_argument("--falcon-model", default="tiiuae/Falcon-Perception-300M", help="Falcon model id")
     parser.add_argument("--sam31-model", default="mlx-community/sam3.1-bf16", help="SAM3.1 model id")
     parser.add_argument("--gemma-endpoint", default=os.environ.get("GEMMA4_ENDPOINT", "http://127.0.0.1:8890"))
     return parser.parse_args()
@@ -851,6 +850,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    # Keep falcon model selection consistent between this harness and vnc-control runtime.
+    os.environ["FALCON_MODEL"] = args.falcon_model
     fixture_path = Path(args.fixture).resolve()
     fixture = load_json(fixture_path)
 

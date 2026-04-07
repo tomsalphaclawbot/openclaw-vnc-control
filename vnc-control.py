@@ -1698,40 +1698,123 @@ def _detect_gemma4(image_path, query, model_id=None):
 
 
 def _load_falcon_model(model_id):
-    """Lazy-load Falcon Perception model for local detection."""
-    from transformers import AutoModelForCausalLM
-    import torch
+    """Lazy-load Falcon Perception runtime for local detection.
 
+    Preferred path is the local Falcon fork + MLX backend (Apple Silicon).
+    Falls back to legacy transformers path if fork runtime is unavailable.
+    """
     global _falcon_model_cache
     if _falcon_model_cache is not None and _falcon_model_cache.get("model_id") == model_id:
-        return _falcon_model_cache["model"], 0.0, _falcon_model_cache.get("device", "cpu")
-
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        device = "mps"
-    elif torch.cuda.is_available():
-        device = "cuda:0"
-    else:
-        device = "cpu"
+        return _falcon_model_cache, 0.0, _falcon_model_cache.get("backend", "unknown")
 
     t0 = time.time()
-    kwargs = {
-        "trust_remote_code": True,
-    }
-    if device != "cpu":
-        kwargs["torch_dtype"] = torch.float16
+
+    # Prefer local fork runtime first.
     try:
-        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        if FALCON_FORK_PATH and Path(FALCON_FORK_PATH).exists() and FALCON_FORK_PATH not in sys.path:
+            sys.path.insert(0, FALCON_FORK_PATH)
+
+        from falcon_perception import load_and_prepare_model, build_prompt_for_task
+
+        backend = (FALCON_BACKEND or "mlx").strip().lower()
+        if backend == "auto":
+            backend = "mlx" if (sys.platform == "darwin" and os.uname().machine == "arm64") else "torch"
+
+        local_dir = FALCON_LOCAL_MODEL_DIR.strip() or None
+        model, tokenizer, model_args = load_and_prepare_model(
+            hf_model_id=model_id,
+            hf_local_dir=local_dir,
+            backend=backend,
+            dtype=FALCON_DTYPE,
+            compile=FALCON_COMPILE,
+        )
+
+        if backend == "mlx":
+            from falcon_perception.mlx.batch_inference import BatchInferenceEngine, process_batch_and_generate
+        else:
+            from falcon_perception.batch_inference import BatchInferenceEngine, process_batch_and_generate
+
+        runtime = {
+            "kind": "falcon_perception",
+            "model_id": model_id,
+            "backend": backend,
+            "model": model,
+            "tokenizer": tokenizer,
+            "model_args": model_args,
+            "build_prompt_for_task": build_prompt_for_task,
+            "BatchInferenceEngine": BatchInferenceEngine,
+            "process_batch_and_generate": process_batch_and_generate,
+        }
+        _falcon_model_cache = runtime
+        return runtime, (time.time() - t0), backend
     except Exception:
-        # Retry without explicit dtype for compatibility with custom model code.
-        model = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)
+        pass
 
-    if hasattr(model, "to"):
-        model = model.to(device)
-    if hasattr(model, "eval"):
-        model = model.eval()
+    # Legacy fallback path (transformers remote-code).
+    try:
+        from transformers import AutoModelForCausalLM
+        import torch
 
-    _falcon_model_cache = {"model": model, "model_id": model_id, "device": device}
-    return model, (time.time() - t0), device
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            device = "mps"
+        elif torch.cuda.is_available():
+            device = "cuda:0"
+        else:
+            device = "cpu"
+
+        kwargs = {"trust_remote_code": True}
+        if device != "cpu":
+            kwargs["torch_dtype"] = torch.float16
+
+        try:
+            model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        except Exception:
+            model = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)
+
+        if hasattr(model, "to"):
+            model = model.to(device)
+        if hasattr(model, "eval"):
+            model = model.eval()
+
+        runtime = {
+            "kind": "legacy_transformers",
+            "model_id": model_id,
+            "backend": device,
+            "model": model,
+        }
+        _falcon_model_cache = runtime
+        return runtime, (time.time() - t0), device
+    except Exception as e:
+        raise RuntimeError(f"Falcon runtime unavailable: {e}")
+
+
+def _pair_falcon_bbox_entries(entries):
+    """Convert Falcon bbox raw list into [{xy:{x,y}, hw:{w,h}}, ...]."""
+    if not isinstance(entries, list):
+        return []
+
+    paired = []
+    i = 0
+    while i + 1 < len(entries):
+        a, b = entries[i], entries[i + 1]
+        if isinstance(a, dict) and isinstance(b, dict):
+            if {"x", "y"}.issubset(a.keys()) and {"h", "w"}.issubset(b.keys()):
+                paired.append({"xy": a, "hw": b})
+            elif {"x", "y"}.issubset(b.keys()) and {"h", "w"}.issubset(a.keys()):
+                paired.append({"xy": b, "hw": a})
+        i += 2
+    return paired
+
+
+def _falcon_to_float(v, default=0.0):
+    try:
+        if hasattr(v, "item"):
+            return float(v.item())
+        if isinstance(v, (list, tuple)) and len(v) == 1:
+            return float(v[0])
+        return float(v)
+    except Exception:
+        return float(default)
 
 
 def _detect_falcon(image_path, query, model_id=None):
@@ -1751,20 +1834,19 @@ def _detect_falcon(image_path, query, model_id=None):
         return _make_detection_result(False, query, "falcon", error=f"Image load failed: {e}")
 
     try:
-        model, t_load, device = _load_falcon_model(model_id)
+        runtime, t_load, runtime_backend = _load_falcon_model(model_id)
     except Exception as e:
         err_txt = str(e)
-        if "triton" in err_txt.lower():
+        if "triton" in err_txt.lower() or "flexattention" in err_txt.lower() or "mps" in err_txt.lower():
             guidance = (
-                "Falcon backend unavailable: upstream Falcon-Perception runtime requires 'triton'. "
-                "On Apple Silicon/macOS this dependency is typically unavailable. "
-                "Run Falcon on Linux/CUDA (with triton installed) or use moondream/gemma4 locally."
+                "Falcon backend unavailable: runtime is incompatible in this environment. "
+                "Use the local Falcon fork with MLX on Apple Silicon, or Linux/CUDA for torch runtime."
             )
         else:
             guidance = (
-                "Falcon backend unavailable. Setup: pip install 'torch>=2.5' transformers pillow einops pycocotools; "
-                "ensure model access to tiiuae/Falcon-Perception. "
-                "On Apple Silicon, use a PyTorch build with MPS enabled."
+                "Falcon backend unavailable. Setup local fork runtime: "
+                "uv pip install -e projects/falcon-perception-fork[mlx] in the active venv, "
+                "and ensure model access to tiiuae/Falcon-Perception."
             )
         return _make_detection_result(False, query, "falcon",
                                       image_size=(w, h),
@@ -1772,39 +1854,121 @@ def _detect_falcon(image_path, query, model_id=None):
                                       note=guidance)
 
     t0 = _time.time()
-    try:
-        generated = model.generate(img, query, compile=FALCON_COMPILE)
-    except TypeError:
-        # Some model revisions may not accept compile kwarg.
-        generated = model.generate(img, query)
-    except Exception as e:
-        return _make_detection_result(False, query, "falcon",
-                                      image_size=(w, h), error=str(e),
-                                      elapsed_s=_time.time() - t0)
 
-    elapsed = _time.time() - t0
-    preds = generated
-    if isinstance(preds, list) and preds and isinstance(preds[0], list):
-        preds = preds[0]
+    # Preferred local fork runtime.
+    if runtime.get("kind") == "falcon_perception":
+        try:
+            engine = runtime["BatchInferenceEngine"](runtime["model"], runtime["tokenizer"])
+            prompt = runtime["build_prompt_for_task"](query, task="detection")
+            batch_inputs = runtime["process_batch_and_generate"](
+                runtime["tokenizer"],
+                [(img, prompt)],
+                max_length=getattr(runtime.get("model_args"), "max_seq_len", 4096),
+                min_dimension=FALCON_MIN_IMAGE_DIM,
+                max_dimension=FALCON_MAX_IMAGE_DIM,
+            )
+            output_tokens, aux_outputs = engine.generate(
+                tokens=batch_inputs["tokens"],
+                pos_t=batch_inputs["pos_t"],
+                pos_hw=batch_inputs["pos_hw"],
+                pixel_values=batch_inputs["pixel_values"],
+                pixel_mask=batch_inputs["pixel_mask"],
+                max_new_tokens=FALCON_MAX_TOKENS,
+                temperature=float(FALCON_TEMPERATURE),
+                task="detection",
+            )
+            aux = aux_outputs[0] if (aux_outputs is not None and len(aux_outputs) > 0) else None
+            bboxes_raw = getattr(aux, "bboxes_raw", []) if aux is not None else []
+            try:
+                query_found = len(bboxes_raw) > 0
+            except Exception:
+                query_found = bool(bboxes_raw)
+            if output_tokens is None:
+                token_count = 0
+            else:
+                try:
+                    token_count = int(output_tokens.shape[1])
+                except Exception:
+                    token_count = int(len(output_tokens[0])) if len(output_tokens) > 0 else 0
+            result = {
+                "query_found": query_found,
+                "bboxes_raw": bboxes_raw,
+                "token_count": token_count,
+            }
+        except Exception as e:
+            return _make_detection_result(
+                False,
+                query,
+                "falcon",
+                image_size=(w, h),
+                error=f"{type(e).__name__}: {e}",
+                note=f"backend={runtime_backend}; local fork runtime failed",
+                elapsed_s=_time.time() - t0,
+            )
 
-    if not preds:
-        return _make_detection_result(False, query, "falcon",
-                                      image_size=(w, h), elapsed_s=elapsed + t_load,
-                                      note="No matching instances returned")
+        elapsed = _time.time() - t0
+        if not isinstance(result, dict) or not result.get("query_found", False):
+            return _make_detection_result(
+                False,
+                query,
+                "falcon",
+                image_size=(w, h),
+                elapsed_s=elapsed + t_load,
+                note=f"backend={runtime_backend}; query not found",
+                raw_extra=str(result)[:300],
+            )
 
-    first = preds[0]
-    xy = first.get("xy") if isinstance(first, dict) else None
-    hw = first.get("hw") if isinstance(first, dict) else None
+        bboxes = _pair_falcon_bbox_entries(result.get("bboxes_raw") or [])
+        if not bboxes:
+            return _make_detection_result(
+                False,
+                query,
+                "falcon",
+                image_size=(w, h),
+                elapsed_s=elapsed + t_load,
+                error="Falcon output missing bbox pairs",
+                raw_extra=str(result)[:300],
+            )
+
+        first = bboxes[0]
+        xy = first.get("xy")
+        hw = first.get("hw")
+    else:
+        # Legacy fallback runtime.
+        model = runtime["model"]
+        try:
+            generated = model.generate(img, query, compile=FALCON_COMPILE)
+        except TypeError:
+            generated = model.generate(img, query)
+        except Exception as e:
+            return _make_detection_result(False, query, "falcon",
+                                          image_size=(w, h), error=str(e),
+                                          elapsed_s=_time.time() - t0)
+
+        elapsed = _time.time() - t0
+        preds = generated
+        if isinstance(preds, list) and preds and isinstance(preds[0], list):
+            preds = preds[0]
+
+        if not preds:
+            return _make_detection_result(False, query, "falcon",
+                                          image_size=(w, h), elapsed_s=elapsed + t_load,
+                                          note="No matching instances returned")
+
+        first = preds[0]
+        xy = first.get("xy") if isinstance(first, dict) else None
+        hw = first.get("hw") if isinstance(first, dict) else None
+
     if not isinstance(xy, dict) or not isinstance(hw, dict):
         return _make_detection_result(False, query, "falcon",
                                       image_size=(w, h), elapsed_s=elapsed + t_load,
                                       error="Falcon output missing xy/hw",
                                       raw_extra=str(first)[:300])
 
-    x = float(xy.get("x", 0.0))
-    y = float(xy.get("y", 0.0))
-    bw = max(0.0, float(hw.get("w", 0.0)))
-    bh = max(0.0, float(hw.get("h", 0.0)))
+    x = _falcon_to_float(xy.get("x", 0.0), 0.0)
+    y = _falcon_to_float(xy.get("y", 0.0), 0.0)
+    bw = max(0.0, _falcon_to_float(hw.get("w", 0.0), 0.0))
+    bh = max(0.0, _falcon_to_float(hw.get("h", 0.0), 0.0))
 
     # Falcon provides normalized center (xy) + normalized size (hw).
     x_min_n = max(0.0, min(1.0, x - (bw / 2.0)))
@@ -1821,7 +1985,7 @@ def _detect_falcon(image_path, query, model_id=None):
     return _make_detection_result(True, query, "falcon",
                                   image_size=(w, h), box=box,
                                   confidence="medium",
-                                  note=f"device={device}; instances={len(preds)}",
+                                  note=f"backend={runtime_backend}",
                                   elapsed_s=elapsed + t_load)
 
 
@@ -1960,8 +2124,19 @@ def compute_image_change_metrics(before_path, after_path, threshold=10):
 
 GEMMA4_ENDPOINT = os.environ.get("GEMMA4_ENDPOINT", "http://127.0.0.1:8890")
 GEMMA4_MODEL = "mlx-community/gemma-4-26b-a4b-it-4bit"
-FALCON_MODEL = os.environ.get("FALCON_MODEL", "tiiuae/Falcon-Perception")
+FALCON_MODEL = os.environ.get("FALCON_MODEL", "tiiuae/Falcon-Perception-300M")
 FALCON_COMPILE = os.environ.get("FALCON_COMPILE", "0").strip().lower() in ("1", "true", "yes", "on")
+FALCON_BACKEND = os.environ.get("FALCON_BACKEND", "mlx")
+FALCON_FORK_PATH = os.environ.get(
+    "FALCON_FORK_PATH",
+    str(Path.home() / ".openclaw" / "workspace" / "projects" / "falcon-perception-fork"),
+)
+FALCON_LOCAL_MODEL_DIR = os.environ.get("FALCON_LOCAL_MODEL_DIR", "")
+FALCON_MAX_TOKENS = int(os.environ.get("FALCON_MAX_TOKENS", "180"))
+FALCON_TEMPERATURE = float(os.environ.get("FALCON_TEMPERATURE", "0.0"))
+FALCON_MIN_IMAGE_DIM = int(os.environ.get("FALCON_MIN_IMAGE_DIM", "256"))
+FALCON_MAX_IMAGE_DIM = int(os.environ.get("FALCON_MAX_IMAGE_DIM", "1024"))
+FALCON_DTYPE = os.environ.get("FALCON_DTYPE", "auto")
 
 def cmd_click_element(args, config):
     """
