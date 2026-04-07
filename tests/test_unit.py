@@ -397,6 +397,9 @@ class TestVisionCliBackendOptions:
         assert result.returncode == 0
         assert "--backend" in result.stdout
         assert "anthropic" in result.stdout
+        assert "auto" in result.stdout
+        assert "florence2" in result.stdout
+        assert "sam31" in result.stdout
 
 
 class TestDetectFalcon:

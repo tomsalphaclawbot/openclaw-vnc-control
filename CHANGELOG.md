@@ -12,12 +12,17 @@ All notable changes to openclaw-vnc-control. Format follows [Keep a Changelog](h
 - Audit log design for per-action accountability
 - `scripts/coord-calibration-audit.py` — synthetic marker round-trip precision audit (screenshot ↔ native)
 - `eval_florence2.py` — Florence-2 grounding evaluation scaffold
+- Four-model benchmark helper: `bench/run_four_model_matrix.sh`
+- Committed benchmark artifacts for local four-model matrix: `bench/results/matrix-20260407-four-models/`
 
 ### Changed
 - `cmd_wait_for` and `cmd_assert_visible` migrated to unified `detect_element()` layer
 - Removed dead code: `_vision_find_element`, `_gemma4_detect`, `_moondream_detect` (replaced by unified layer)
 - Removed hardcoded venv path from Moondream backend
 - `cmd_click_element` now reports objective state-change metrics and supports retry-on-no-change (`--verify-retries`, `--retry-offset`)
+- Added local backend support for `florence2` and `sam31` in unified `detect_element()` path
+- Backend selection now supports `auto` with configurable chain via `VNC_VISION_BACKEND_DEFAULT` and `VNC_VISION_BACKEND_CHAIN`
+- `click_element`, `find_element`, `wait_for`, `assert_visible` backend choices now include: `auto`, `florence2`, `sam31`
 
 ---
 

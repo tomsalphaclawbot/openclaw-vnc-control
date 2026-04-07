@@ -1,13 +1,13 @@
 {
   "generated_at": "2026-04-05T23:24:18.219164+00:00",
-  "run_id": "matrix-20260405",
+  "run_id": "matrix-20260407-four-models",
   "source": {
     "base_url": "http://127.0.0.1:3015",
     "page": "/vnc-click-lab",
     "coords_url": "http://127.0.0.1:3015/api/element-coords"
   },
   "image": {
-    "path": "/Users/openclaw/.openclaw/workspace/projects/worktrees/task-20260405-004-benchmark-matrix/bench/results/matrix-20260405/fixture-click-lab.png",
+    "path": "/Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/bench/results/matrix-20260407-four-models/fixture-click-lab.png",
     "width": 1710,
     "height": 913,
     "viewport": "1710,913"

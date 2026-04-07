@@ -347,10 +347,10 @@ Measured with deterministic Click Lab fixture (`8` positive + `2` negative cases
 
 | Backend | Runnable | Pos Recall | Neg Specificity | Median Error (px) | P95 Error (px) | Median Latency (s) |
 |---|---:|---:|---:|---:|---:|---:|
-| moondream | yes | 1.000 | 0.000 | 2.000 | 60.564 | 4.260 |
-| falcon | yes | 1.000 | 1.000 | 48.795 | 1007.661 | 1.042 |
-| florence2 | yes | 1.000 | 1.000 | 2.229 | 129.455 | 0.570 |
-| sam31 | yes | 0.875 | 1.000 | 4.586 | 1108.214 | 9.538 |
+| moondream | yes | 1.000 | 0.000 | 2.000 | 60.564 | 4.311 |
+| falcon | yes | 1.000 | 1.000 | 48.795 | 1007.661 | 1.089 |
+| florence2 | yes | 1.000 | 1.000 | 2.229 | 129.455 | 0.580 |
+| sam31 | yes | 0.875 | 1.000 | 4.586 | 1108.214 | 9.681 |
 
 Artifacts:
 - `bench/results/matrix-20260407-four-models/benchmark_matrix.json`
