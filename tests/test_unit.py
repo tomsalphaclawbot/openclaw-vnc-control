@@ -279,6 +279,10 @@ class TestDetectElementDispatch:
         assert vnc._normalize_detection_backend("claude") == "anthropic"
         assert vnc._normalize_detection_backend("moondream2") == "moondream"
         assert vnc._normalize_detection_backend("falcon-perception") == "falcon"
+        assert vnc._normalize_detection_backend("default") == "auto"
+        assert vnc._normalize_detection_backend("best") == "auto"
+        assert vnc._normalize_detection_backend("florence-2") == "florence2"
+        assert vnc._normalize_detection_backend("sam3.1") == "sam31"
 
     def test_dispatch_routes_to_expected_backend(self, monkeypatch, tmp_path):
         img = tmp_path / "dispatch.jpg"
@@ -296,14 +300,33 @@ class TestDetectElementDispatch:
         monkeypatch.setattr(vnc, "_detect_gemma4", _stub("gemma4"))
         monkeypatch.setattr(vnc, "_detect_anthropic", _stub("anthropic"))
         monkeypatch.setattr(vnc, "_detect_falcon", _stub("falcon"))
+        monkeypatch.setattr(vnc, "_detect_florence2", _stub("florence2"))
+        monkeypatch.setattr(vnc, "_detect_sam31", _stub("sam31"))
 
         vnc.detect_element(str(img), "button", backend="moondream")
         vnc.detect_element(str(img), "button", backend="gemma4")
         vnc.detect_element(str(img), "button", backend="anthropic")
         vnc.detect_element(str(img), "button", backend="remote")
         vnc.detect_element(str(img), "button", backend="falcon")
+        vnc.detect_element(str(img), "button", backend="florence2")
+        vnc.detect_element(str(img), "button", backend="sam31")
 
-        assert calls == ["moondream", "gemma4", "anthropic", "anthropic", "falcon"]
+        assert calls == ["moondream", "gemma4", "anthropic", "anthropic", "falcon", "florence2", "sam31"]
+
+    def test_auto_backend_chain_tries_in_order(self, monkeypatch, tmp_path):
+        img = tmp_path / "auto.jpg"
+        img.write_bytes(b"fake")
+
+        monkeypatch.setattr(vnc, "VNC_VISION_BACKEND_CHAIN", "florence2,falcon,sam31,moondream")
+        monkeypatch.setattr(vnc, "_detect_florence2", lambda *a, **k: {"found": False, "backend": "florence2"})
+        monkeypatch.setattr(vnc, "_detect_falcon", lambda *a, **k: {"found": True, "backend": "falcon", "center": {"x": 1, "y": 2}})
+
+        result = vnc.detect_element(str(img), "button", backend="auto")
+        assert result["found"] is True
+        assert result["backend"] == "falcon"
+        assert result["backend_requested"] == "auto"
+        attempts = result.get("auto_attempts") or []
+        assert [a["backend"] for a in attempts] == ["florence2", "falcon"]
 
     def test_unknown_backend_returns_error(self, tmp_path):
         img = tmp_path / "unknown.jpg"
@@ -362,6 +385,9 @@ class TestVisionCliBackendOptions:
         assert result.returncode == 0
         assert "--backend" in result.stdout
         assert "falcon" in result.stdout
+        assert "florence2" in result.stdout
+        assert "sam31" in result.stdout
+        assert "auto" in result.stdout
 
     def test_find_element_help_lists_backend_flag(self):
         result = subprocess.run(
@@ -385,7 +411,15 @@ class TestDetectFalcon:
             def generate(self, *args, **kwargs):
                 return [[{"xy": {"x": 0.5, "y": 0.5}, "hw": {"w": 0.25, "h": 0.5}}]]
 
-        monkeypatch.setattr(vnc, "_load_falcon_model", lambda model_id: (FakeModel(), 0.0, "mps"))
+        monkeypatch.setattr(
+            vnc,
+            "_load_falcon_model",
+            lambda model_id: (
+                {"kind": "legacy_transformers", "model": FakeModel(), "backend": "mps", "model_id": model_id},
+                0.0,
+                "mps",
+            ),
+        )
 
         result = vnc._detect_falcon(str(self._img(tmp_path)), "button")
         assert result["found"] is True

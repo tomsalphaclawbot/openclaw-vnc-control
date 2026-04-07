@@ -30,6 +30,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -59,6 +60,8 @@ STATE_FILE = STATE_DIR / "last_capture.json"
 # Vision model caches (lazy-loaded)
 _moondream_model_cache = None
 _falcon_model_cache = None
+_florence2_model_cache = None
+_sam31_predictor_cache = None
 
 # ─── .env loader ──────────────────────────────────────────────────────────────
 
@@ -1452,7 +1455,7 @@ def cmd_assert_visible(args, config):
 # {
 #   "found":       bool,
 #   "query":       str,
-#   "backend":     str,        # "moondream" | "gemma4" | "falcon" | "anthropic"
+#   "backend":     str,        # "moondream" | "gemma4" | "falcon" | "florence2" | "sam31" | "anthropic"
 #   "image_size":  [w, h],     # actual image dims fed to the model
 #   "box": {                   # bounding box in screenshot-space px
 #     "x_min": int, "y_min": int,
@@ -1526,25 +1529,115 @@ def _make_detection_result(found, query, backend, image_size=None,
 def _normalize_detection_backend(backend):
     """Map backend aliases to canonical backend names."""
     if not backend:
-        return "moondream"
+        return "auto"
     b = str(backend).strip().lower()
     aliases = {
         "remote": "anthropic",
         "claude": "anthropic",
         "moondream2": "moondream",
         "falcon-perception": "falcon",
+        "default": "auto",
+        "best": "auto",
+        "florence-2": "florence2",
+        "sam3.1": "sam31",
+        "sam3_1": "sam31",
     }
     return aliases.get(b, b)
 
 
-def detect_element(image_path, query, backend="moondream", config=None, capture_scale=None):
+def _model_cached(model_id):
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        cached = try_to_load_from_cache(model_id, "config.json")
+        return isinstance(cached, str) and bool(cached)
+    except Exception:
+        return False
+
+
+_LABELED_RE = re.compile(r'\blabeled\s+"([^"]+)"', re.IGNORECASE)
+
+
+def _extract_labeled_text(query):
+    if not query:
+        return None
+    m = _LABELED_RE.search(str(query))
+    if not m:
+        return None
+    label = (m.group(1) or "").strip()
+    return label or None
+
+
+def _parse_polygon_bbox(polygons):
+    if not isinstance(polygons, list):
+        return None
+    for poly in polygons:
+        pts = poly
+        if isinstance(poly, list) and poly and isinstance(poly[0], (list, tuple)):
+            pts = poly[0]
+        if not isinstance(pts, (list, tuple)) or len(pts) < 4:
+            continue
+        try:
+            xs = [float(v) for v in pts[0::2]]
+            ys = [float(v) for v in pts[1::2]]
+        except Exception:
+            continue
+        if not xs or not ys:
+            continue
+        x_min, x_max = min(xs), max(xs)
+        y_min, y_max = min(ys), max(ys)
+        # Ignore near-line polygons that are effectively misses.
+        if (x_max - x_min) < 2 or (y_max - y_min) < 2:
+            continue
+        return x_min, y_min, x_max, y_max
+    return None
+
+
+def _auto_backend_chain():
+    configured = [
+        _normalize_detection_backend(b)
+        for b in str(VNC_VISION_BACKEND_CHAIN).split(",")
+        if str(b).strip()
+    ]
+    allowed = ["florence2", "falcon", "sam31", "moondream", "gemma4", "anthropic"]
+    chain = []
+    for backend in configured:
+        if backend in allowed and backend not in chain:
+            chain.append(backend)
+    if not chain:
+        chain = ["florence2", "falcon", "sam31", "moondream"]
+    return chain
+
+
+def _detect_single_backend(image_path, query, backend):
+    if backend == "gemma4":
+        return _detect_gemma4(image_path, query)
+    if backend == "falcon":
+        return _detect_falcon(image_path, query)
+    if backend == "anthropic":
+        return _detect_anthropic(image_path, query)
+    if backend == "moondream":
+        return _detect_moondream(image_path, query)
+    if backend == "florence2":
+        return _detect_florence2(image_path, query)
+    if backend == "sam31":
+        return _detect_sam31(image_path, query)
+    return _make_detection_result(
+        False,
+        query,
+        backend,
+        error=f"Unsupported backend '{backend}'. Use one of: auto, moondream, gemma4, falcon, florence2, sam31, anthropic",
+    )
+
+
+def detect_element(image_path, query, backend="auto", config=None, capture_scale=None):
     """
     UNIFIED entry point for element detection across all vision backends.
 
     Args:
         image_path:    path to the screenshot (must be the EXACT image the model will see)
         query:         natural language description of the element
-        backend:       "moondream" | "gemma4" | "falcon" | "anthropic" ("remote" alias accepted)
+        backend:       "auto" | "moondream" | "gemma4" | "falcon" | "florence2" | "sam31" | "anthropic"
         config:        VNC config dict (used if native coord conversion is needed by caller)
         capture_scale: scale used to produce image_path from native resolution
                        (stored in result for caller to use with resolve_native_coords)
@@ -1554,18 +1647,35 @@ def detect_element(image_path, query, backend="moondream", config=None, capture_
                                           "screenshot", config, scale=capture_scale)
     """
     backend = _normalize_detection_backend(backend)
-    result = None
-    if backend == "gemma4":
-        result = _detect_gemma4(image_path, query)
-    elif backend == "falcon":
-        result = _detect_falcon(image_path, query)
-    elif backend == "anthropic":
-        result = _detect_anthropic(image_path, query)
-    elif backend == "moondream":
-        result = _detect_moondream(image_path, query)
+    if backend == "auto":
+        attempts = []
+        for candidate in _auto_backend_chain():
+            result = _detect_single_backend(image_path, query, candidate)
+            attempts.append(
+                {
+                    "backend": candidate,
+                    "found": bool(result.get("found")),
+                    "error": result.get("error"),
+                    "note": result.get("note"),
+                }
+            )
+            if result.get("found"):
+                result["backend_requested"] = "auto"
+                result["auto_attempts"] = attempts
+                if capture_scale is not None:
+                    result["capture_scale"] = capture_scale
+                return result
+
+        result = _make_detection_result(
+            False,
+            query,
+            "auto",
+            error="Element not found by auto backend chain",
+            note=f"Tried: {', '.join(a['backend'] for a in attempts)}",
+        )
+        result["auto_attempts"] = attempts
     else:
-        result = _make_detection_result(False, query, backend,
-                                        error=f"Unsupported backend '{backend}'. Use one of: moondream, gemma4, falcon, anthropic")
+        result = _detect_single_backend(image_path, query, backend)
 
     if capture_scale is not None:
         result["capture_scale"] = capture_scale
@@ -1697,6 +1807,209 @@ def _detect_gemma4(image_path, query, model_id=None):
                                   image_size=(w, h), box=box,
                                   confidence=parsed.get("confidence", "medium"),
                                   note=parsed.get("note"), elapsed_s=elapsed)
+
+
+def _detect_florence2(image_path, query, model_id=None):
+    """Florence-2 open-vocabulary detection backend."""
+    try:
+        from PIL import Image
+        from transformers import AutoModelForCausalLM, AutoProcessor
+        import torch
+    except ImportError as e:
+        return _make_detection_result(False, query, "florence2", error=f"Missing dep: {e}")
+
+    model_id = model_id or FLORENCE2_MODEL
+    if not VNC_VISION_ALLOW_MODEL_DOWNLOAD and not _model_cached(model_id):
+        return _make_detection_result(
+            False,
+            query,
+            "florence2",
+            error=f"Model not cached locally: {model_id}",
+            note="Set VNC_VISION_ALLOW_MODEL_DOWNLOAD=1 or prefetch model into HF cache",
+        )
+
+    global _florence2_model_cache
+    t_load = 0.0
+    if _florence2_model_cache is None or _florence2_model_cache.get("model_id") != model_id:
+        t0 = time.time()
+        local_only = not VNC_VISION_ALLOW_MODEL_DOWNLOAD
+        try:
+            processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True, local_files_only=local_only)
+            model = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True, local_files_only=local_only)
+        except Exception as e:
+            return _make_detection_result(False, query, "florence2", error=f"Model load failed: {e}")
+        device = "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"
+        model = model.to(device).eval()
+        _florence2_model_cache = {
+            "model_id": model_id,
+            "model": model,
+            "processor": processor,
+            "device": device,
+        }
+        t_load = time.time() - t0
+
+    runtime = _florence2_model_cache
+    model = runtime["model"]
+    processor = runtime["processor"]
+    device = runtime["device"]
+
+    try:
+        img = Image.open(image_path).convert("RGB")
+    except Exception as e:
+        return _make_detection_result(False, query, "florence2", error=f"Image load failed: {e}")
+    w, h = img.size
+
+    task = "<OPEN_VOCABULARY_DETECTION>"
+    target = _extract_labeled_text(query) or query
+    prompt = f"{task}{target}"
+
+    t0 = time.time()
+    try:
+        inputs = processor(text=prompt, images=img, return_tensors="pt")
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        with torch.no_grad():
+            generated_ids = model.generate(**inputs, max_new_tokens=256, do_sample=False)
+        text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+        parsed = processor.post_process_generation(text, task=task, image_size=(w, h))
+    except Exception as e:
+        return _make_detection_result(
+            False,
+            query,
+            "florence2",
+            image_size=(w, h),
+            elapsed_s=time.time() - t0,
+            error=str(e),
+        )
+    elapsed = time.time() - t0
+
+    detections = parsed.get(task, {}) if isinstance(parsed, dict) else {}
+    bboxes = detections.get("bboxes") or []
+    if bboxes:
+        x_min, y_min, x_max, y_max = [float(v) for v in bboxes[0]]
+    else:
+        poly_box = _parse_polygon_bbox(detections.get("polygons") or [])
+        if not poly_box:
+            return _make_detection_result(
+                False,
+                query,
+                "florence2",
+                image_size=(w, h),
+                elapsed_s=elapsed + t_load,
+                note="no boxes",
+            )
+        x_min, y_min, x_max, y_max = poly_box
+
+    return _make_detection_result(
+        True,
+        query,
+        "florence2",
+        image_size=(w, h),
+        box={"x_min": x_min, "y_min": y_min, "x_max": x_max, "y_max": y_max},
+        confidence="medium",
+        elapsed_s=elapsed + t_load,
+    )
+
+
+def _detect_sam31(image_path, query, model_id=None):
+    """SAM3.1 text-prompted detector backend (mlx-vlm)."""
+    try:
+        import numpy as np
+        from PIL import Image
+        from mlx_vlm.utils import get_model_path, load_model
+        from mlx_vlm.models.sam3.generate import Sam3Predictor
+        from mlx_vlm.models.sam3_1.processing_sam3_1 import Sam31Processor
+    except ImportError as e:
+        return _make_detection_result(False, query, "sam31", error=f"Missing dep: {e}")
+
+    model_id = model_id or SAM31_MODEL
+    if not VNC_VISION_ALLOW_MODEL_DOWNLOAD and not _model_cached(model_id):
+        return _make_detection_result(
+            False,
+            query,
+            "sam31",
+            error=f"Model not cached locally: {model_id}",
+            note="Set VNC_VISION_ALLOW_MODEL_DOWNLOAD=1 or prefetch model into HF cache",
+        )
+
+    global _sam31_predictor_cache
+    t_load = 0.0
+    if _sam31_predictor_cache is None or _sam31_predictor_cache.get("model_id") != model_id:
+        t0 = time.time()
+        try:
+            model_path = get_model_path(model_id)
+            model = load_model(model_path)
+            processor = Sam31Processor.from_pretrained(str(model_path))
+            predictor = Sam3Predictor(model, processor, score_threshold=0.2)
+        except Exception as e:
+            return _make_detection_result(False, query, "sam31", error=f"Model load failed: {e}")
+        _sam31_predictor_cache = {"model_id": model_id, "predictor": predictor}
+        t_load = time.time() - t0
+
+    predictor = _sam31_predictor_cache["predictor"]
+    try:
+        img = Image.open(image_path).convert("RGB")
+    except Exception as e:
+        return _make_detection_result(False, query, "sam31", error=f"Image load failed: {e}")
+    w, h = img.size
+
+    target = _extract_labeled_text(query)
+    q_candidates = [query]
+    if target:
+        q_candidates = [target, query]
+        ql = query.lower()
+        if "input field" in ql:
+            q_candidates.insert(0, f"input field {target}")
+        elif "icon button" in ql:
+            q_candidates.insert(0, f"icon {target}")
+        elif "button" in ql or "nav" in ql:
+            q_candidates.insert(0, f"{target} button")
+
+    t0 = time.time()
+    best_score = None
+    best_box = None
+    for q in q_candidates:
+        try:
+            candidate = predictor.predict(img, text_prompt=q)
+        except Exception as e:
+            return _make_detection_result(
+                False,
+                query,
+                "sam31",
+                image_size=(w, h),
+                elapsed_s=time.time() - t0,
+                error=str(e),
+            )
+        scores = np.asarray(getattr(candidate, "scores", []))
+        boxes = np.asarray(getattr(candidate, "boxes", []))
+        if scores.size == 0 or boxes.size == 0:
+            continue
+        idx = int(scores.argmax())
+        score = float(scores[idx])
+        if best_score is None or score > best_score:
+            best_score = score
+            best_box = boxes[idx]
+
+    elapsed = time.time() - t0
+    if best_score is None or best_box is None:
+        return _make_detection_result(
+            False,
+            query,
+            "sam31",
+            image_size=(w, h),
+            elapsed_s=elapsed + t_load,
+            note="no detections",
+        )
+
+    x1, y1, x2, y2 = [float(v) for v in best_box.tolist()]
+    return _make_detection_result(
+        True,
+        query,
+        "sam31",
+        image_size=(w, h),
+        box={"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
+        confidence="medium",
+        elapsed_s=elapsed + t_load,
+    )
 
 
 def _load_falcon_model(model_id):
@@ -2128,6 +2441,7 @@ def compute_image_change_metrics(before_path, after_path, threshold=10):
 
 GEMMA4_ENDPOINT = os.environ.get("GEMMA4_ENDPOINT", "http://127.0.0.1:8890")
 GEMMA4_MODEL = "mlx-community/gemma-4-26b-a4b-it-4bit"
+FLORENCE2_MODEL = os.environ.get("FLORENCE2_MODEL", "microsoft/Florence-2-base-ft")
 FALCON_MODEL = os.environ.get("FALCON_MODEL", "tiiuae/Falcon-Perception-300M")
 FALCON_COMPILE = os.environ.get("FALCON_COMPILE", "0").strip().lower() in ("1", "true", "yes", "on")
 FALCON_BACKEND = os.environ.get("FALCON_BACKEND", "mlx")
@@ -2141,11 +2455,24 @@ FALCON_TEMPERATURE = float(os.environ.get("FALCON_TEMPERATURE", "0.0"))
 FALCON_MIN_IMAGE_DIM = int(os.environ.get("FALCON_MIN_IMAGE_DIM", "256"))
 FALCON_MAX_IMAGE_DIM = int(os.environ.get("FALCON_MAX_IMAGE_DIM", "1024"))
 FALCON_DTYPE = os.environ.get("FALCON_DTYPE", "auto")
+SAM31_MODEL = os.environ.get("SAM31_MODEL", "mlx-community/sam3.1-bf16")
+VNC_VISION_ALLOW_MODEL_DOWNLOAD = os.environ.get("VNC_VISION_ALLOW_MODEL_DOWNLOAD", "0").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+VNC_VISION_BACKEND_DEFAULT = os.environ.get("VNC_VISION_BACKEND_DEFAULT", "auto")
+VNC_VISION_BACKEND_CHAIN = os.environ.get(
+    "VNC_VISION_BACKEND_CHAIN",
+    "florence2,falcon,sam31,moondream",
+)
 
 def cmd_click_element(args, config):
     """
     Phase 8b: click_element — find a UI element by natural language, click its center.
-    Uses local vision backends (moondream/gemma4/falcon) or Anthropic API.
+    Uses local vision backends (florence2/falcon/sam31/moondream/gemma4) or Anthropic API.
+    Default backend is configurable via VNC_VISION_BACKEND_DEFAULT (defaults to auto chain).
     Falls back to remote Anthropic when local detection fails.
 
     COORDINATE PIPELINE (critical — must stay in sync):
@@ -2178,7 +2505,7 @@ def cmd_click_element(args, config):
     tmp_img = convert_screenshot(raw_png, tmp_img, fmt="jpeg", scale=capture_scale, quality=quality)
 
     # 2. Detect element using unified detection layer
-    backend_requested = getattr(args, "backend", "moondream")
+    backend_requested = getattr(args, "backend", VNC_VISION_BACKEND_DEFAULT)
     backend = _normalize_detection_backend(backend_requested)
     detection = detect_element(tmp_img, description, backend=backend,
                                config=config, capture_scale=capture_scale)
@@ -3182,8 +3509,8 @@ def main():
     p = sub.add_parser("find_element", help="[Phase 7] Locate a UI element using vision model")
     p.add_argument("description", help="Natural language description of element to find (e.g. 'Save button', 'username input field')")
     p.add_argument("--model", default=None, help="Vision model to use (default: claude-opus-4-5 or $VNC_VISION_MODEL)")
-    p.add_argument("--backend", choices=["anthropic", "moondream", "gemma4", "falcon", "remote"], default="anthropic",
-                   help="Detection backend: anthropic (API), moondream/gemma4/falcon (local), remote=anthropic alias")
+    p.add_argument("--backend", choices=["auto", "anthropic", "moondream", "gemma4", "falcon", "florence2", "sam31", "remote"], default=VNC_VISION_BACKEND_DEFAULT,
+                   help="Detection backend: auto (best local chain), florence2/falcon/sam31/moondream/gemma4 (local), anthropic/remote (API)")
     p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None)
     p.add_argument("--scale", type=float, default=None)
     p.add_argument("--quality", type=int, default=None)
@@ -3194,8 +3521,8 @@ def main():
     p.add_argument("--timeout", type=float, default=30, help="Max wait time in seconds (default: 30)")
     p.add_argument("--interval", type=float, default=2.0, help="Poll interval in seconds (default: 2.0)")
     p.add_argument("--model", default=None, help="Vision model to use (default: claude-opus-4-5 or $VNC_VISION_MODEL)")
-    p.add_argument("--backend", choices=["anthropic", "moondream", "gemma4", "falcon", "remote"], default="anthropic",
-                   help="Detection backend: anthropic (API), moondream/gemma4/falcon (local), remote=anthropic alias")
+    p.add_argument("--backend", choices=["auto", "anthropic", "moondream", "gemma4", "falcon", "florence2", "sam31", "remote"], default=VNC_VISION_BACKEND_DEFAULT,
+                   help="Detection backend: auto (best local chain), florence2/falcon/sam31/moondream/gemma4 (local), anthropic/remote (API)")
     p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None)
     p.add_argument("--scale", type=float, default=None)
     p.add_argument("--quality", type=int, default=None)
@@ -3204,8 +3531,8 @@ def main():
     p = sub.add_parser("assert_visible", help="[Phase 7] Assert an element/text is visible (exit 0=found, 1=not found)")
     p.add_argument("description", help="Natural language description of element to verify")
     p.add_argument("--model", default=None, help="Vision model to use (default: claude-opus-4-5 or $VNC_VISION_MODEL)")
-    p.add_argument("--backend", choices=["anthropic", "moondream", "gemma4", "falcon", "remote"], default="anthropic",
-                   help="Detection backend: anthropic (API), moondream/gemma4/falcon (local), remote=anthropic alias")
+    p.add_argument("--backend", choices=["auto", "anthropic", "moondream", "gemma4", "falcon", "florence2", "sam31", "remote"], default=VNC_VISION_BACKEND_DEFAULT,
+                   help="Detection backend: auto (best local chain), florence2/falcon/sam31/moondream/gemma4 (local), anthropic/remote (API)")
     p.add_argument("--format", choices=["png", "jpeg", "jpg"], default=None)
     p.add_argument("--scale", type=float, default=None)
     p.add_argument("--quality", type=int, default=None)
@@ -3315,14 +3642,14 @@ def main():
     p.add_argument("--raw", action="store_true",
                    help="Include per-word confidence + bounding boxes in output")
 
-    # click_element - Phase 8b local vision (Moondream2)
+    # click_element - Phase 8b local vision
     p = sub.add_parser("click_element",
         help="[Phase 8b] Find a UI element by natural language and click it (local vision or Anthropic API)")
     p.add_argument("description", help="Natural language description of the element to click")
     p.add_argument("--button", choices=["left", "right", "middle"], default="left")
     p.add_argument("--double", action="store_true", help="Double-click")
-    p.add_argument("--backend", choices=["moondream", "gemma4", "falcon", "anthropic", "remote"], default="moondream",
-                   help="Vision backend: moondream (local), gemma4 (local server), falcon (local grounding), anthropic/remote (API)")
+    p.add_argument("--backend", choices=["auto", "moondream", "gemma4", "falcon", "florence2", "sam31", "anthropic", "remote"], default=VNC_VISION_BACKEND_DEFAULT,
+                   help="Vision backend: auto (best local chain), florence2/falcon/sam31/moondream/gemma4 (local), anthropic/remote (API)")
     p.add_argument("--verify-threshold", type=int, default=10,
                    help="Pixel diff threshold for post-click state-change detection (0-255, default: 10)")
     p.add_argument("--verify-min-change-pct", type=float, default=0.03,

@@ -186,9 +186,9 @@ All paths go through the same `resolve_native_coords()` function. Adding a new m
 | **Resolution mismatch between models** | ⚠️ **KNOWN** | Each model was trained/evaluated at specific resolutions. Moondream2 was likely trained mostly on lower-res UI screenshots. Gemma 4 handles varied resolutions better. If detection is consistently off by a fixed offset or ratio, check what resolution the model expects vs what it receives. |
 | **Gemma 4 normalized coords require image dims at parse time** | ✅ **HANDLED** | `_gemma4_detect()` opens the image with PIL to get actual dims before converting 0-1 floats to px. Never assume image dims. |
 | **Scale drift if profile changes** | ⚠️ **KNOWN** | If `--profile` or `--scale` changes between screenshot and coord interpretation, clicks will be off. `cmd_click_element` records `capture_scale` from `capture_settings()` and passes it to `resolve_native_coords()` — do not hardcode `SCALE = 0.5` in new code. |
-| **Moondream2 hallucinates absent elements** | ⚠️ **KNOWN** | Moondream2 will sometimes return a bounding box for an element that doesn't exist (e.g., returned coords for "close button" on a dialog that has none). Gemma 4 correctly returns `found: false` in the same case. Prefer Gemma 4 (`--backend gemma4`) for precision work. |
-| **Falcon Perception on Apple Silicon requires Triton** | ⚠️ **BLOCKED LOCALLY** | Falcon backend is integrated, but upstream `tiiuae/Falcon-Perception` currently hard-requires `triton` at model load. On macOS/Apple Silicon this dependency is typically unavailable, so backend returns explicit setup guidance and fails cleanly. |
-| **Florence-2 not yet benchmarked** | 🧪 **SCAFFOLD READY** | `eval_florence2.py` added to run local open-vocabulary detection probes. Still pending click-lab accuracy + latency benchmarking before backend integration. |
+| **Moondream2 hallucinates absent elements** | ⚠️ **KNOWN** | Moondream2 can return false positives on absent labels. Keep it as an opt-in backend for stubborn edge cases, not first-choice default. |
+| **Falcon Perception on Apple Silicon** | ✅ **RUNNABLE (FORK + MLX)** | Local Falcon fork path is wired and benchmarked. Quality is usable but still less stable than Florence2 on some prompts. |
+| **Florence-2 backend** | ✅ **INTEGRATED + BENCHMARKED** | Florence2 is now wired into detection/click flow and benchmark matrix; currently strongest default in this environment. |
 
 See [`docs/vision-models.md`](./docs/vision-models.md) for full model comparison.
 
@@ -341,26 +341,38 @@ python3 scripts/coord-calibration-audit.py --scale 0.5 --out /tmp/coord-audit.js
 
 This reports objective round-trip metrics (`median_error_native_px`, `p95_error_native_px`, `max_error_native_px`) and pass/fail against a configurable threshold.
 
-## Benchmark Results (matrix-20260405)
+## Benchmark Results (matrix-20260407-four-models)
 
 Measured with deterministic Click Lab fixture (`8` positive + `2` negative cases):
 
 | Backend | Runnable | Pos Recall | Neg Specificity | Median Error (px) | P95 Error (px) | Median Latency (s) |
 |---|---:|---:|---:|---:|---:|---:|
-| moondream | yes | 1.000 | 0.000 | 2.000 | 60.564 | 4.400 |
-| gemma4 | yes | 0.625 | 1.000 | 121.529 | 132.559 | 3.049 |
-| anthropic | no (`ANTHROPIC_API_KEY` missing) | - | - | - | - | - |
-| falcon | no (model not cached) | - | - | - | - | - |
-| florence2 | no (model not cached) | - | - | - | - | - |
-| sam2 | no (no text-grounding stack) | - | - | - | - | - |
+| moondream | yes | 1.000 | 0.000 | 2.000 | 60.564 | 4.260 |
+| falcon | yes | 1.000 | 1.000 | 48.795 | 1007.661 | 1.042 |
+| florence2 | yes | 1.000 | 1.000 | 2.229 | 129.455 | 0.570 |
+| sam31 | yes | 0.875 | 1.000 | 4.586 | 1108.214 | 9.538 |
 
 Artifacts:
-- `bench/results/matrix-20260405/benchmark_matrix.json`
-- `bench/results/matrix-20260405/benchmark_matrix.csv`
-- `bench/results/matrix-20260405/benchmark_matrix.md`
+- `bench/results/matrix-20260407-four-models/benchmark_matrix.json`
+- `bench/results/matrix-20260407-four-models/benchmark_matrix.csv`
+- `bench/results/matrix-20260407-four-models/benchmark_matrix.md`
+- `bench/results/matrix-20260407-four-models/fixture.json`
 - Repro runbook: `bench/README.md`
 
-Recommended backend order for this environment: `gemma4` → `moondream` → `anthropic` (if key configured) → `florence2` → `falcon` → `sam2`.
+Recommended local backend chain for this environment: `florence2` → `falcon` → `sam31` → `moondream`.
+
+Default is now configurable via:
+- `VNC_VISION_BACKEND_DEFAULT=auto` (default)
+- `VNC_VISION_BACKEND_CHAIN=florence2,falcon,sam31,moondream`
+
+You can still force a specific backend at runtime, for example:
+
+```bash
+python vnc-control.py click_element "Allow button" --backend moondream
+python vnc-control.py click_element "Allow button" --backend falcon
+python vnc-control.py click_element "Allow button" --backend florence2
+python vnc-control.py click_element "Allow button" --backend sam31
+```
 
 ## History
 
