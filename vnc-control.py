@@ -1556,6 +1556,7 @@ def _model_cached(model_id):
 
 
 _LABELED_RE = re.compile(r'\blabeled\s+"([^"]+)"', re.IGNORECASE)
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
 def _extract_labeled_text(query):
@@ -1566,6 +1567,41 @@ def _extract_labeled_text(query):
         return None
     label = (m.group(1) or "").strip()
     return label or None
+
+
+def _text_tokens(value):
+    return [t for t in _TOKEN_RE.findall(str(value).lower()) if len(t) >= 2]
+
+
+def _ocr_has_label_text(image_path, label_text):
+    """Best-effort OCR guard for cautious auto fallback decisions."""
+    tokens = _text_tokens(label_text)
+    if not tokens:
+        return False, "ocr guard blocked: empty label tokens"
+
+    try:
+        import pytesseract
+        from PIL import Image
+    except Exception as exc:
+        return False, f"ocr guard blocked: OCR unavailable ({exc})"
+
+    try:
+        img = Image.open(image_path).convert("RGB")
+    except Exception as exc:
+        return False, f"ocr guard blocked: image load failed ({exc})"
+
+    try:
+        text = pytesseract.image_to_string(img, lang="eng", config="--psm 6")
+    except Exception as exc:
+        return False, f"ocr guard blocked: OCR failed ({exc})"
+
+    observed = set(_text_tokens(text))
+    missing = [t for t in tokens if t not in observed]
+    if missing:
+        preview = ", ".join(missing[:3])
+        return False, f"ocr guard blocked: missing label tokens ({preview})"
+
+    return True, "ocr guard passed"
 
 
 def _parse_polygon_bbox(polygons):
@@ -1665,6 +1701,38 @@ def detect_element(image_path, query, backend="auto", config=None, capture_scale
                 if capture_scale is not None:
                     result["capture_scale"] = capture_scale
                 return result
+
+        label_text = _extract_labeled_text(query)
+        tried_moondream = any(a.get("backend") == "moondream" for a in attempts)
+        if VNC_VISION_AUTO_MOONDREAM_LABEL_FALLBACK and label_text and not tried_moondream:
+            guard_ok, guard_note = _ocr_has_label_text(image_path, label_text)
+            if guard_ok:
+                guarded = _detect_single_backend(image_path, query, "moondream")
+                note = guarded.get("note")
+                guarded["note"] = f"{note}; {guard_note}" if note else guard_note
+                attempts.append(
+                    {
+                        "backend": "moondream",
+                        "found": bool(guarded.get("found")),
+                        "error": guarded.get("error"),
+                        "note": guarded.get("note"),
+                    }
+                )
+                if guarded.get("found"):
+                    guarded["backend_requested"] = "auto"
+                    guarded["auto_attempts"] = attempts
+                    if capture_scale is not None:
+                        guarded["capture_scale"] = capture_scale
+                    return guarded
+            else:
+                attempts.append(
+                    {
+                        "backend": "moondream",
+                        "found": False,
+                        "error": None,
+                        "note": guard_note,
+                    }
+                )
 
         result = _make_detection_result(
             False,
@@ -2467,6 +2535,10 @@ VNC_VISION_BACKEND_CHAIN = os.environ.get(
     "VNC_VISION_BACKEND_CHAIN",
     "florence2,falcon,sam31",
 )
+VNC_VISION_AUTO_MOONDREAM_LABEL_FALLBACK = os.environ.get(
+    "VNC_VISION_AUTO_MOONDREAM_LABEL_FALLBACK",
+    "1",
+).strip().lower() in ("1", "true", "yes", "on")
 
 def cmd_click_element(args, config):
     """

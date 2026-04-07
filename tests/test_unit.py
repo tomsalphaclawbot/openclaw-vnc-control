@@ -328,6 +328,47 @@ class TestDetectElementDispatch:
         attempts = result.get("auto_attempts") or []
         assert [a["backend"] for a in attempts] == ["florence2", "falcon"]
 
+    def test_auto_chain_uses_guarded_moondream_fallback_when_ocr_confirms_label(self, monkeypatch, tmp_path):
+        img = tmp_path / "auto-guard-pass.jpg"
+        img.write_bytes(b"fake")
+
+        monkeypatch.setattr(vnc, "VNC_VISION_BACKEND_CHAIN", "florence2,falcon,sam31")
+        monkeypatch.setattr(vnc, "VNC_VISION_AUTO_MOONDREAM_LABEL_FALLBACK", True)
+        monkeypatch.setattr(vnc, "_detect_florence2", lambda *a, **k: {"found": False, "backend": "florence2"})
+        monkeypatch.setattr(vnc, "_detect_falcon", lambda *a, **k: {"found": False, "backend": "falcon"})
+        monkeypatch.setattr(vnc, "_detect_sam31", lambda *a, **k: {"found": False, "backend": "sam31"})
+        monkeypatch.setattr(vnc, "_ocr_has_label_text", lambda *a, **k: (True, "ocr guard passed"))
+        monkeypatch.setattr(
+            vnc,
+            "_detect_moondream",
+            lambda *a, **k: {"found": True, "backend": "moondream", "center": {"x": 1, "y": 2}},
+        )
+
+        result = vnc.detect_element(str(img), 'text labeled "Implemented."', backend="auto")
+        assert result["found"] is True
+        assert result["backend"] == "moondream"
+        assert result["backend_requested"] == "auto"
+        attempts = result.get("auto_attempts") or []
+        assert [a["backend"] for a in attempts] == ["florence2", "falcon", "sam31", "moondream"]
+
+    def test_auto_chain_blocks_moondream_fallback_when_ocr_misses_label(self, monkeypatch, tmp_path):
+        img = tmp_path / "auto-guard-block.jpg"
+        img.write_bytes(b"fake")
+
+        monkeypatch.setattr(vnc, "VNC_VISION_BACKEND_CHAIN", "florence2,falcon,sam31")
+        monkeypatch.setattr(vnc, "VNC_VISION_AUTO_MOONDREAM_LABEL_FALLBACK", True)
+        monkeypatch.setattr(vnc, "_detect_florence2", lambda *a, **k: {"found": False, "backend": "florence2"})
+        monkeypatch.setattr(vnc, "_detect_falcon", lambda *a, **k: {"found": False, "backend": "falcon"})
+        monkeypatch.setattr(vnc, "_detect_sam31", lambda *a, **k: {"found": False, "backend": "sam31"})
+        monkeypatch.setattr(vnc, "_ocr_has_label_text", lambda *a, **k: (False, "ocr guard blocked"))
+
+        result = vnc.detect_element(str(img), 'text labeled "OBSIDIAN BANANA"', backend="auto")
+        assert result["found"] is False
+        attempts = result.get("auto_attempts") or []
+        assert [a["backend"] for a in attempts] == ["florence2", "falcon", "sam31", "moondream"]
+        assert attempts[-1]["found"] is False
+        assert "blocked" in str(attempts[-1].get("note", "")).lower()
+
     def test_unknown_backend_returns_error(self, tmp_path):
         img = tmp_path / "unknown.jpg"
         img.write_bytes(b"fake")

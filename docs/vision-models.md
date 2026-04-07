@@ -8,9 +8,10 @@ Default backend mode is now **auto**:
 
 - `VNC_VISION_BACKEND_DEFAULT=auto`
 - `VNC_VISION_BACKEND_CHAIN=florence2,falcon,sam31`
+- `VNC_VISION_AUTO_MOONDREAM_LABEL_FALLBACK=1`
 
 So the system tries the strongest local backends first.
-`moondream` remains available as an explicit/manual backend for hard recall cases, but it is excluded from default auto-chain due no-click false-positive risk observed in live desktop checks.
+`moondream` remains available as an explicit/manual backend for hard recall cases, and can be used as an OCR-guarded last-chance auto fallback when `VNC_VISION_AUTO_MOONDREAM_LABEL_FALLBACK=1`.
 You can still force a specific backend with `--backend <name>`. 
 
 ## Supported backends
