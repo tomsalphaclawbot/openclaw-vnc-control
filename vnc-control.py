@@ -1506,11 +1506,13 @@ def _make_detection_result(found, query, backend, image_size=None,
     cy = (ymin + ymax) // 2
     r.update({
         "box":  {"x_min": xmin, "y_min": ymin, "x_max": xmax, "y_max": ymax},
+        "box_px": {"x_min": xmin, "y_min": ymin, "x_max": xmax, "y_max": ymax},
         "box_norm": {
             "x_min": round(xmin / w, 6), "y_min": round(ymin / h, 6),
             "x_max": round(xmax / w, 6), "y_max": round(ymax / h, 6),
         },
         "center":      {"x": cx, "y": cy},
+        "center_px":   {"x": cx, "y": cy},
         "center_norm": {"x": round(cx / w, 6), "y": round(cy / h, 6)},
         "confidence":  confidence,
     })
@@ -1835,6 +1837,8 @@ def _detect_falcon(image_path, query, model_id=None):
 
     try:
         runtime, t_load, runtime_backend = _load_falcon_model(model_id)
+        if not isinstance(runtime, dict):
+            raise RuntimeError("Falcon runtime unavailable: loader returned invalid runtime")
     except Exception as e:
         err_txt = str(e)
         if "triton" in err_txt.lower() or "flexattention" in err_txt.lower() or "mps" in err_txt.lower():

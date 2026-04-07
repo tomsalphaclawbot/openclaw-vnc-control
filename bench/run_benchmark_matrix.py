@@ -24,7 +24,9 @@ import importlib.util
 import json
 import math
 import os
+import re
 import statistics
+import subprocess
 import time
 import traceback
 import urllib.request
@@ -423,6 +425,199 @@ def parse_fenced_json(text: str) -> dict[str, Any]:
     return json.loads(text)
 
 
+_LABELED_RE = re.compile(r"\blabeled\s+\"([^\"]+)\"", re.IGNORECASE)
+
+
+def extract_labeled_text(query: str) -> str | None:
+    m = _LABELED_RE.search(query or "")
+    if not m:
+        return None
+    label = (m.group(1) or "").strip()
+    return label or None
+
+
+def _norm_token(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+def _append_note(existing: str | None, extra: str) -> str:
+    if not existing:
+        return extra
+    if extra in existing:
+        return existing
+    return f"{existing}; {extra}"
+
+
+def _parse_polygon_bbox(polygons: Any) -> tuple[float, float, float, float] | None:
+    if not isinstance(polygons, list):
+        return None
+    for poly in polygons:
+        pts = poly
+        if isinstance(poly, list) and poly and isinstance(poly[0], (list, tuple)):
+            pts = poly[0]
+        if not isinstance(pts, (list, tuple)) or len(pts) < 4:
+            continue
+        try:
+            xs = [float(v) for v in pts[0::2]]
+            ys = [float(v) for v in pts[1::2]]
+        except Exception:
+            continue
+        if not xs or not ys:
+            continue
+        x_min, x_max = min(xs), max(xs)
+        y_min, y_max = min(ys), max(ys)
+        # Ignore near-line degenerates that Florence can emit for misses.
+        if (x_max - x_min) < 2 or (y_max - y_min) < 2:
+            continue
+        return x_min, y_min, x_max, y_max
+    return None
+
+
+def _extract_ocr_words(image_path: Path, ocr_cache: dict[str, Any]) -> list[dict[str, Any]]:
+    key = str(image_path.resolve())
+    if key in ocr_cache:
+        return ocr_cache[key]
+
+    cmd = ["tesseract", str(image_path), "stdout", "tsv", "--psm", "6"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=12, check=False)
+    except Exception:
+        ocr_cache[key] = []
+        return []
+
+    if proc.returncode != 0 or not proc.stdout:
+        ocr_cache[key] = []
+        return []
+
+    lines = proc.stdout.splitlines()
+    if not lines:
+        ocr_cache[key] = []
+        return []
+
+    header = lines[0].split("\t")
+    idx = {name: i for i, name in enumerate(header)}
+    required = {"left", "top", "width", "height", "conf", "text"}
+    if not required.issubset(idx.keys()):
+        ocr_cache[key] = []
+        return []
+
+    words: list[dict[str, Any]] = []
+    for line in lines[1:]:
+        cols = line.split("\t")
+        if len(cols) < len(header):
+            continue
+        txt = cols[idx["text"]].strip()
+        tok = _norm_token(txt)
+        if not tok:
+            continue
+        try:
+            conf = float(cols[idx["conf"]])
+            left = float(cols[idx["left"]])
+            top = float(cols[idx["top"]])
+            width = float(cols[idx["width"]])
+            height = float(cols[idx["height"]])
+        except Exception:
+            continue
+        if conf < 20:
+            continue
+        words.append(
+            {
+                "text": txt,
+                "token": tok,
+                "conf": conf,
+                "left": left,
+                "top": top,
+                "width": width,
+                "height": height,
+            }
+        )
+
+    ocr_cache[key] = words
+    return words
+
+
+def _find_label_in_ocr(image_path: Path, label: str, ocr_cache: dict[str, Any]) -> dict[str, Any] | None:
+    words = _extract_ocr_words(image_path, ocr_cache)
+    if not words:
+        return None
+
+    label_tokens = [_norm_token(t) for t in re.split(r"\s+", label.strip())]
+    label_tokens = [t for t in label_tokens if t]
+    if not label_tokens:
+        return None
+
+    n = len(label_tokens)
+    best: dict[str, Any] | None = None
+    for i in range(0, len(words) - n + 1):
+        chunk = words[i : i + n]
+        if [w["token"] for w in chunk] != label_tokens:
+            continue
+        left = min(w["left"] for w in chunk)
+        top = min(w["top"] for w in chunk)
+        right = max(w["left"] + w["width"] for w in chunk)
+        bottom = max(w["top"] + w["height"] for w in chunk)
+        score = sum(float(w["conf"]) for w in chunk) / n
+        cand = {
+            "box": {"x_min": left, "y_min": top, "x_max": right, "y_max": bottom},
+            "center": {"x": (left + right) / 2.0, "y": (top + bottom) / 2.0},
+            "confidence": round(score / 100.0, 3),
+        }
+        if best is None or cand["confidence"] > best["confidence"]:
+            best = cand
+    return best
+
+
+def apply_label_ocr_postprocess(
+    backend: str,
+    image_path: Path,
+    query: str,
+    result: dict[str, Any],
+    ocr_cache: dict[str, Any],
+    enabled: bool,
+) -> dict[str, Any]:
+    if not enabled or backend not in {"falcon", "florence2", "sam31"}:
+        return result
+
+    label = extract_labeled_text(query)
+    if not label:
+        return result
+
+    # OCR guard is reliable for simple human-readable labels; skip machine-ish IDs.
+    if "_" in label:
+        return result
+
+    hint = _find_label_in_ocr(image_path, label, ocr_cache)
+    found = bool(result.get("found"))
+    pred = extract_center(result)
+
+    if hint is None:
+        if not found:
+            return result
+        patched = dict(result)
+        patched["found"] = False
+        patched["note"] = _append_note(result.get("note"), f"label OCR guard: text '{label}' not found")
+        return patched
+
+    dist = None
+    if pred:
+        dist = math.dist((pred[0], pred[1]), (hint["center"]["x"], hint["center"]["y"]))
+
+    # Use OCR anchor if model missed, or predicted a far-away location.
+    if (not found) or (dist is not None and dist > 140.0):
+        patched = dict(result)
+        patched["found"] = True
+        patched["center"] = {"x": hint["center"]["x"], "y": hint["center"]["y"]}
+        patched["center_px"] = {"x": hint["center"]["x"], "y": hint["center"]["y"]}
+        patched["box"] = dict(hint["box"])
+        patched["box_px"] = dict(hint["box"])
+        patched["confidence"] = result.get("confidence") or hint.get("confidence")
+        action = "fallback" if not found else "snap"
+        patched["note"] = _append_note(result.get("note"), f"label OCR {action}: '{label}'")
+        return patched
+
+    return result
+
+
 def run_florence2_detector(
     image_path: Path,
     query: str,
@@ -449,7 +644,8 @@ def run_florence2_detector(
     img = Image.open(image_path).convert("RGB")
     width, height = img.size
     task = "<OPEN_VOCABULARY_DETECTION>"
-    prompt = f"{task}{query}"
+    target = extract_labeled_text(query) or query
+    prompt = f"{task}{target}"
 
     t0 = time.time()
     inputs = processor(text=prompt, images=img, return_tensors="pt")
@@ -462,10 +658,13 @@ def run_florence2_detector(
 
     detections = parsed.get(task, {}) if isinstance(parsed, dict) else {}
     bboxes = detections.get("bboxes") or []
-    if not bboxes:
-        return {"found": False, "backend": "florence2", "elapsed_s": round(elapsed, 3), "note": "no boxes"}
-
-    x_min, y_min, x_max, y_max = bboxes[0]
+    if bboxes:
+        x_min, y_min, x_max, y_max = [float(v) for v in bboxes[0]]
+    else:
+        poly_box = _parse_polygon_bbox(detections.get("polygons") or [])
+        if not poly_box:
+            return {"found": False, "backend": "florence2", "elapsed_s": round(elapsed, 3), "note": "no boxes"}
+        x_min, y_min, x_max, y_max = poly_box
     cx = (float(x_min) + float(x_max)) / 2.0
     cy = (float(y_min) + float(y_max)) / 2.0
     return {
@@ -585,24 +784,50 @@ def run_sam31_detector(
     img = Image.open(image_path).convert("RGB")
 
     t0 = time.time()
-    out = predictor.predict(img, text_prompt=query)
+    target = extract_labeled_text(query)
+    q_candidates = [query]
+    if target:
+        q_candidates = [target, query]
+        if "input field" in query.lower():
+            q_candidates.insert(0, f"input field {target}")
+        elif "icon button" in query.lower():
+            q_candidates.insert(0, f"icon {target}")
+        elif "button" in query.lower() or "nav" in query.lower():
+            q_candidates.insert(0, f"{target} button")
+
+    out = None
+    best_score = None
+    best_box = None
+    best_query = None
+    for q in q_candidates:
+        candidate = predictor.predict(img, text_prompt=q)
+        scores = np.asarray(getattr(candidate, "scores", []))
+        boxes = np.asarray(getattr(candidate, "boxes", []))
+        if scores.size == 0 or boxes.size == 0:
+            continue
+        idx = int(scores.argmax())
+        score = float(scores[idx])
+        if best_score is None or score > best_score:
+            best_score = score
+            best_box = boxes[idx]
+            best_query = q
+            out = candidate
     elapsed = time.time() - t0
 
-    scores = np.asarray(getattr(out, "scores", []))
-    boxes = np.asarray(getattr(out, "boxes", []))
-    if scores.size == 0 or boxes.size == 0:
+    if best_score is None or best_box is None:
         return {"found": False, "backend": "sam31", "elapsed_s": round(elapsed, 3), "note": "no detections"}
 
-    best_idx = int(scores.argmax())
-    x1, y1, x2, y2 = [float(v) for v in boxes[best_idx].tolist()]
+    x1, y1, x2, y2 = [float(v) for v in best_box.tolist()]
+    all_scores = np.asarray(getattr(out, "scores", [])) if out is not None else np.asarray([])
     return {
         "found": True,
         "backend": "sam31",
         "elapsed_s": round(elapsed, 3),
         "center": {"x": (x1 + x2) / 2.0, "y": (y1 + y2) / 2.0},
         "box": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
-        "confidence": float(scores[best_idx]),
-        "detections": int(scores.size),
+        "confidence": float(best_score),
+        "detections": int(all_scores.size),
+        "query_used": best_query,
     }
 
 
@@ -628,6 +853,8 @@ def run_backend_case(
     falcon_model: str,
     sam31_model: str,
     allow_model_download: bool,
+    ocr_cache: dict[str, Any],
+    label_ocr_postprocess: bool,
 ) -> dict[str, Any]:
     start = time.time()
     try:
@@ -651,6 +878,15 @@ def run_backend_case(
             "error": f"{exc}",
             "traceback": traceback.format_exc(limit=2),
         }
+
+    result = apply_label_ocr_postprocess(
+        backend=backend,
+        image_path=image_path,
+        query=case.query,
+        result=result,
+        ocr_cache=ocr_cache,
+        enabled=label_ocr_postprocess,
+    )
 
     elapsed = float(result.get("elapsed_s", round(time.time() - start, 3)))
     found = bool(result.get("found", False))
@@ -845,6 +1081,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--falcon-model", default="tiiuae/Falcon-Perception-300M", help="Falcon model id")
     parser.add_argument("--sam31-model", default="mlx-community/sam3.1-bf16", help="SAM3.1 model id")
     parser.add_argument("--gemma-endpoint", default=os.environ.get("GEMMA4_ENDPOINT", "http://127.0.0.1:8890"))
+    parser.add_argument(
+        "--no-label-ocr-postprocess",
+        action="store_true",
+        help="Disable OCR label guard/snap fallback for falcon/florence2/sam31",
+    )
     return parser.parse_args()
 
 
@@ -887,6 +1128,7 @@ def main() -> int:
     florence_state: dict[str, Any] = {}
     falcon_state: dict[str, Any] = {}
     sam31_state: dict[str, Any] = {}
+    ocr_cache: dict[str, Any] = {}
 
     for backend in backends:
         probe = probe_backend(
@@ -917,6 +1159,8 @@ def main() -> int:
                     falcon_model=args.falcon_model,
                     sam31_model=args.sam31_model,
                     allow_model_download=args.allow_model_download,
+                    ocr_cache=ocr_cache,
+                    label_ocr_postprocess=not args.no_label_ocr_postprocess,
                 )
                 backend_rows.append(row)
                 all_rows.append(row)
@@ -936,6 +1180,7 @@ def main() -> int:
             "falcon_model": args.falcon_model,
             "sam31_model": args.sam31_model,
             "gemma_endpoint": args.gemma_endpoint,
+            "label_ocr_postprocess": not args.no_label_ocr_postprocess,
         },
         "cases": [
             {
