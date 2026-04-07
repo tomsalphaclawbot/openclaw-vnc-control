@@ -57,6 +57,89 @@ def vnc_cfg():
     }
 
 
+def detect_chrome_remote_debug_dialog():
+    """Detect Chrome's 'Allow remote debugging?' dialog via Accessibility tree."""
+    script = '''
+    tell application "System Events"
+      if not (exists process "Google Chrome") then return "NO_CHROME"
+      tell process "Google Chrome"
+        if not (exists window 1) then return "NO_WINDOW"
+        set hasPrompt to false
+        set buttonsFound to ""
+        try
+          set elems to entire contents of window 1
+          repeat with e in elems
+            try
+              set n to name of e as text
+              if n contains "Allow remote debugging?" then
+                set hasPrompt to true
+              end if
+            end try
+            try
+              if role of e is "AXButton" then
+                set d to description of e as text
+                if d is "Allow" or d is "Cancel" or d is "Turn off in settings" then
+                  if buttonsFound is not "" then set buttonsFound to buttonsFound & "|||"
+                  set buttonsFound to buttonsFound & d
+                end if
+              end if
+            end try
+          end repeat
+        end try
+        if hasPrompt then
+          return "FOUND|" & buttonsFound
+        end if
+      end tell
+    end tell
+    return "NOT_FOUND"
+    '''
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
+        output = result.stdout.strip()
+        if output.startswith("FOUND|"):
+            raw = output.split("|", 1)[1] if "|" in output else ""
+            buttons = [b.strip() for b in raw.split("|||") if b.strip()]
+            return {"visible": True, "buttons": buttons, "process": "Google Chrome"}
+        return None
+    except Exception:
+        return None
+
+
+def dismiss_chrome_remote_debug_dialog(button_name="Allow"):
+    """Press one of Chrome remote-debug dialog buttons using AXPress."""
+    script = f'''
+    tell application "System Events"
+      if not (exists process "Google Chrome") then return "ERROR:Chrome not running"
+      tell process "Google Chrome"
+        if not (exists window 1) then return "ERROR:No Chrome window"
+        set elems to entire contents of window 1
+        repeat with e in elems
+          try
+            if role of e is "AXButton" then
+              set d to description of e as text
+              if d is "{button_name}" then
+                perform action "AXPress" of e
+                return "CLICKED"
+              end if
+            end if
+          end try
+        end repeat
+      end tell
+    end tell
+    return "ERROR:Button not found"
+    '''
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
+        output = result.stdout.strip()
+        if output == "CLICKED":
+            return True, f"Clicked '{button_name}' via Chrome AXPress"
+        return False, output.replace("ERROR:", "").strip() if output else "Unknown AppleScript result"
+    except subprocess.TimeoutExpired:
+        return False, "AppleScript timed out"
+    except Exception as e:
+        return False, str(e)
+
+
 # ============================================================
 # DAEMON — persistent vncdotool API connection
 # ============================================================
@@ -140,9 +223,11 @@ class Daemon:
             "duration_s": dur,
         }
 
-    def click(self, x, y, button="left", double=False, space="capture"):
+    def click(self, x, y, button="left", double=False, space="capture", dialog_button="Allow"):
         nx, ny = self._to_native(x, y, space)
         btn = {"left": 1, "right": 3, "middle": 2}.get(button, 1)
+        chrome_dialog_before = detect_chrome_remote_debug_dialog()
+
         with self.lock:
             def do():
                 self.client.mouseMove(nx, ny)
@@ -151,7 +236,26 @@ class Daemon:
                     time.sleep(0.05)
                     self.client.mousePress(btn)
             self._with_retry(do)
-        return {"ok": True, "native_x": nx, "native_y": ny, "button": button}
+
+        resp = {"ok": True, "native_x": nx, "native_y": ny, "button": button}
+
+        # Chrome-specific fallback: this dialog can ignore coordinate clicks.
+        if chrome_dialog_before and chrome_dialog_before.get("visible"):
+            time.sleep(0.2)
+            chrome_dialog_after = detect_chrome_remote_debug_dialog()
+            if chrome_dialog_after and chrome_dialog_after.get("visible"):
+                fallback_ok, fallback_msg = dismiss_chrome_remote_debug_dialog(dialog_button)
+                resp["chrome_dialog_fallback"] = {
+                    "triggered": True,
+                    "reason": "VNC click did not dismiss Chrome remote-debugging dialog; used AXPress fallback",
+                    "button_clicked": dialog_button,
+                    "method": "AppleScript accessibility API (Google Chrome AXButton description)",
+                    "success": fallback_ok,
+                    "message": fallback_msg,
+                    "dialog_info": chrome_dialog_after,
+                }
+
+        return resp
 
     def move(self, x, y, space="capture"):
         nx, ny = self._to_native(x, y, space)
@@ -551,7 +655,8 @@ def run_daemon():
                                      req.get("scale", DEFAULT_SCALE), req.get("quality", DEFAULT_QUALITY))
             elif cmd == "click":
                 resp = d.click(req["x"], req["y"], req.get("button", "left"),
-                                req.get("double", False), req.get("space", "capture"))
+                                req.get("double", False), req.get("space", "capture"),
+                                req.get("dialog_button", "Allow"))
             elif cmd == "move":
                 resp = d.move(req["x"], req["y"], req.get("space", "capture"))
             elif cmd == "type":
@@ -684,6 +789,9 @@ def main():
     c.add_argument("--button", "-b", default="left", choices=["left", "right", "middle"])
     c.add_argument("--double", "-d", action="store_true")
     c.add_argument("--space", default="capture", choices=["native", "capture", "normalized", "n", "c"])
+    c.add_argument("--dialog-button", default="Allow",
+                   choices=["Allow", "Cancel", "Turn off in settings"],
+                   help="Chrome remote-debugging dialog fallback button (if dialog is detected)")
 
     m = sub.add_parser("move")
     m.add_argument("x", type=float)
@@ -714,7 +822,8 @@ def main():
         "ss": lambda a: out(send({"cmd": "screenshot", "out": a.out, "format": a.format,
                                    "scale": a.scale, "quality": a.quality})),
         "click": lambda a: out(send({"cmd": "click", "x": a.x, "y": a.y,
-                                      "button": a.button, "double": a.double, "space": a.space})),
+                                      "button": a.button, "double": a.double, "space": a.space,
+                                      "dialog_button": a.dialog_button})),
         "move": lambda a: out(send({"cmd": "move", "x": a.x, "y": a.y, "space": a.space})),
         "type": lambda a: out(send({"cmd": "type", "text": a.text})),
         "key": lambda a: out(send({"cmd": "key", "key": a.key})),
