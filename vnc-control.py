@@ -1556,6 +1556,7 @@ def _model_cached(model_id):
 
 
 _LABELED_RE = re.compile(r'\blabeled\s+"([^"]+)"', re.IGNORECASE)
+_NAMED_RE = re.compile(r'\bnamed\s+"([^"]+)"', re.IGNORECASE)
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -1569,8 +1570,41 @@ def _extract_labeled_text(query):
     return label or None
 
 
+def _extract_query_guard_text(query):
+    if not query:
+        return None
+    text = str(query)
+    for pattern in (_LABELED_RE, _NAMED_RE):
+        m = pattern.search(text)
+        if not m:
+            continue
+        value = (m.group(1) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _extract_named_text(query):
+    if not query:
+        return None
+    m = _NAMED_RE.search(str(query))
+    if not m:
+        return None
+    value = (m.group(1) or "").strip()
+    return value or None
+
+
 def _text_tokens(value):
     return [t for t in _TOKEN_RE.findall(str(value).lower()) if len(t) >= 2]
+
+
+def _should_apply_strict_label_guard(label_text):
+    tokens = _text_tokens(label_text)
+    if not tokens:
+        return False
+    # Guard aggressively only for short, high-risk labels that are common FP triggers
+    # in click-lab negatives (e.g., OBSIDIAN BANANA, Teleport).
+    return len(tokens) <= 2 and any(len(t) >= 8 for t in tokens)
 
 
 def _ocr_has_label_text(image_path, label_text):
@@ -1684,17 +1718,47 @@ def detect_element(image_path, query, backend="auto", config=None, capture_scale
     """
     backend = _normalize_detection_backend(backend)
     if backend == "auto":
+        guard_text = _extract_query_guard_text(query)
+        labeled_text = _extract_labeled_text(query)
+        named_text = _extract_named_text(query)
+        found_guard_text = named_text
+        if not found_guard_text and _should_apply_strict_label_guard(labeled_text):
+            found_guard_text = labeled_text
+
+        guard_eval = None
+        found_guard_eval = None
+
+        def _get_guard_eval():
+            nonlocal guard_eval
+            if guard_eval is None:
+                guard_eval = _ocr_has_label_text(image_path, guard_text)
+            return guard_eval
+
+        def _get_found_guard_eval():
+            nonlocal found_guard_eval
+            if found_guard_eval is None:
+                found_guard_eval = _ocr_has_label_text(image_path, found_guard_text)
+            return found_guard_eval
+
         attempts = []
         for candidate in _auto_backend_chain():
             result = _detect_single_backend(image_path, query, candidate)
-            attempts.append(
-                {
-                    "backend": candidate,
-                    "found": bool(result.get("found")),
-                    "error": result.get("error"),
-                    "note": result.get("note"),
-                }
-            )
+            attempt = {
+                "backend": candidate,
+                "found": bool(result.get("found")),
+                "error": result.get("error"),
+                "note": result.get("note"),
+            }
+            if result.get("found") and found_guard_text:
+                guard_ok, guard_note = _get_found_guard_eval()
+                note = result.get("note")
+                result["note"] = f"{note}; {guard_note}" if note else guard_note
+                attempt["note"] = result.get("note")
+                if not guard_ok:
+                    attempt["found"] = False
+                    attempts.append(attempt)
+                    continue
+            attempts.append(attempt)
             if result.get("found"):
                 result["backend_requested"] = "auto"
                 result["auto_attempts"] = attempts
@@ -1702,10 +1766,10 @@ def detect_element(image_path, query, backend="auto", config=None, capture_scale
                     result["capture_scale"] = capture_scale
                 return result
 
-        label_text = _extract_labeled_text(query)
+        label_text = guard_text
         tried_moondream = any(a.get("backend") == "moondream" for a in attempts)
         if VNC_VISION_AUTO_MOONDREAM_LABEL_FALLBACK and label_text and not tried_moondream:
-            guard_ok, guard_note = _ocr_has_label_text(image_path, label_text)
+            guard_ok, guard_note = _get_guard_eval()
             if guard_ok:
                 guarded = _detect_single_backend(image_path, query, "moondream")
                 note = guarded.get("note")

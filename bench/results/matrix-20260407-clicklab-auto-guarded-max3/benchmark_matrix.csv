@@ -1,0 +1,12 @@
+backend,case_id,query,expected_found,found,elapsed_s,status,label,kind,expected_center_x,expected_center_y,pred_center_x,pred_center_y,error_px,error_dx_px,error_dy_px,classification,confidence,backend_error,backend_note
+auto,pos-agent_input,"input field labeled ""agent_input text field""",True,True,1.951,ok,agent_input text field,input,269.0,294.0,139.0,295.0,130.004,-130.0,1.0,tp,medium,,
+auto,pos-agent_text_field,"input field labeled ""agent_text_field textarea""",True,True,0.642,ok,agent_text_field textarea,textarea,269.0,385.0,153.0,328.0,129.248,-116.0,-57.0,tp,medium,,
+auto,pos-focus_agent_input,"button labeled ""Focus agent_input""",True,True,0.575,ok,Focus agent_input,button,153.5,231.0,154.0,231.0,0.5,0.5,0.0,tp,medium,,
+auto,pos-focus_agent_text_field,"button labeled ""Focus agent_text_field""",True,True,0.614,ok,Focus agent_text_field,button,384.5,231.0,385.0,231.0,0.5,0.5,0.0,tp,medium,,
+auto,pos-nav_density,"button labeled ""Density""",True,True,0.575,ok,Density,nav-link,415.914,20.0,419.0,19.0,3.244,3.086,-1.0,tp,medium,,
+auto,pos-nav_dynamic,"button labeled ""Dynamic""",True,True,0.543,ok,Dynamic,nav-link,481.758,20.0,483.0,19.0,1.595,1.242,-1.0,tp,medium,,
+auto,pos-nav_forms,"button labeled ""Forms""",True,True,0.572,ok,Forms,nav-link,245.672,20.0,247.0,19.0,1.662,1.328,-1.0,tp,medium,,
+auto,pos-nav_grid__easy_,"button labeled ""Grid (Easy)""",True,True,0.616,ok,Grid (Easy),nav-link,176.586,20.0,179.0,19.0,2.613,2.414,-1.0,tp,medium,,
+auto,neg-no-such-grid-button,"button labeled ""OBSIDIAN BANANA""",False,False,0.0,ok,,,,,,,,,,tn,,Element not found by auto backend chain,"Tried: florence2, falcon, sam31, moondream"
+auto,neg-no-such-icon-button,"icon button labeled ""Teleport""",False,False,0.0,ok,,,,,,,,,,tn,,Element not found by auto backend chain,"Tried: florence2, falcon, sam31, moondream"
+auto,neg-no-such-input,"input field named ""ghost_field""",False,False,0.0,ok,,,,,,,,,,tn,,Element not found by auto backend chain,"Tried: florence2, falcon, sam31, moondream"

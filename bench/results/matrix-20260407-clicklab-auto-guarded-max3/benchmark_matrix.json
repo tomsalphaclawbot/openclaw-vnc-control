@@ -1,0 +1,368 @@
+{
+  "generated_at": "2026-04-07T18:20:23.556088+00:00",
+  "fixture_path": "/Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/bench/results/matrix-20260407-clicklab-retry/fixture.json",
+  "image_path": "/Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/bench/results/matrix-20260407-clicklab-retry/fixture-click-lab.png",
+  "config": {
+    "backends": [
+      "auto"
+    ],
+    "max_positive": 8,
+    "max_negative": 3,
+    "allow_model_download": false,
+    "florence_model": "microsoft/Florence-2-base-ft",
+    "falcon_model": "tiiuae/Falcon-Perception-300M",
+    "sam31_model": "mlx-community/sam3.1-bf16",
+    "gemma_endpoint": "http://127.0.0.1:8890",
+    "label_ocr_postprocess": true
+  },
+  "cases": [
+    {
+      "case_id": "pos-agent_input",
+      "query": "input field labeled \"agent_input text field\"",
+      "expected_found": true,
+      "expected_center": [
+        269.0,
+        294.0
+      ],
+      "label": "agent_input text field",
+      "kind": "input"
+    },
+    {
+      "case_id": "pos-agent_text_field",
+      "query": "input field labeled \"agent_text_field textarea\"",
+      "expected_found": true,
+      "expected_center": [
+        269.0,
+        385.0
+      ],
+      "label": "agent_text_field textarea",
+      "kind": "textarea"
+    },
+    {
+      "case_id": "pos-focus_agent_input",
+      "query": "button labeled \"Focus agent_input\"",
+      "expected_found": true,
+      "expected_center": [
+        153.5,
+        231.0
+      ],
+      "label": "Focus agent_input",
+      "kind": "button"
+    },
+    {
+      "case_id": "pos-focus_agent_text_field",
+      "query": "button labeled \"Focus agent_text_field\"",
+      "expected_found": true,
+      "expected_center": [
+        384.5,
+        231.0
+      ],
+      "label": "Focus agent_text_field",
+      "kind": "button"
+    },
+    {
+      "case_id": "pos-nav_density",
+      "query": "button labeled \"Density\"",
+      "expected_found": true,
+      "expected_center": [
+        415.9141,
+        20.0
+      ],
+      "label": "Density",
+      "kind": "nav-link"
+    },
+    {
+      "case_id": "pos-nav_dynamic",
+      "query": "button labeled \"Dynamic\"",
+      "expected_found": true,
+      "expected_center": [
+        481.7578,
+        20.0
+      ],
+      "label": "Dynamic",
+      "kind": "nav-link"
+    },
+    {
+      "case_id": "pos-nav_forms",
+      "query": "button labeled \"Forms\"",
+      "expected_found": true,
+      "expected_center": [
+        245.6719,
+        20.0
+      ],
+      "label": "Forms",
+      "kind": "nav-link"
+    },
+    {
+      "case_id": "pos-nav_grid__easy_",
+      "query": "button labeled \"Grid (Easy)\"",
+      "expected_found": true,
+      "expected_center": [
+        176.5859,
+        20.0
+      ],
+      "label": "Grid (Easy)",
+      "kind": "nav-link"
+    },
+    {
+      "case_id": "neg-no-such-grid-button",
+      "query": "button labeled \"OBSIDIAN BANANA\"",
+      "expected_found": false,
+      "expected_center": null,
+      "label": null,
+      "kind": null
+    },
+    {
+      "case_id": "neg-no-such-icon-button",
+      "query": "icon button labeled \"Teleport\"",
+      "expected_found": false,
+      "expected_center": null,
+      "label": null,
+      "kind": null
+    },
+    {
+      "case_id": "neg-no-such-input",
+      "query": "input field named \"ghost_field\"",
+      "expected_found": false,
+      "expected_center": null,
+      "label": null,
+      "kind": null
+    }
+  ],
+  "probes": {
+    "auto": {
+      "backend": "auto",
+      "runnable": true,
+      "reason_class": "ok",
+      "reason": "auto chain is runtime-configured via vnc-control.py",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/bench/results/matrix-20260407-clicklab-retry/fixture.json --backends auto --max-positive 1 --max-negative 0",
+      "next_steps": []
+    }
+  },
+  "backend_summaries": [
+    {
+      "backend": "auto",
+      "runnable": true,
+      "attempted": 11,
+      "positive_cases": 8,
+      "negative_cases": 3,
+      "tp": 8,
+      "fn": 0,
+      "tn": 3,
+      "fp": 0,
+      "positive_recall": 1.0,
+      "negative_specificity": 1.0,
+      "median_error_px": 2.138,
+      "p95_error_px": 129.739,
+      "median_latency_s": 0.575,
+      "reason_class": "ok",
+      "reason": "auto chain is runtime-configured via vnc-control.py",
+      "dry_run_command": "python3 bench/run_benchmark_matrix.py --fixture /Users/openclaw/.openclaw/workspace/projects/openclaw-vnc-control/bench/results/matrix-20260407-clicklab-retry/fixture.json --backends auto --max-positive 1 --max-negative 0",
+      "next_steps": []
+    }
+  ],
+  "rows": [
+    {
+      "backend": "auto",
+      "case_id": "pos-agent_input",
+      "query": "input field labeled \"agent_input text field\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 1.951,
+      "status": "ok",
+      "label": "agent_input text field",
+      "kind": "input",
+      "expected_center_x": 269.0,
+      "expected_center_y": 294.0,
+      "pred_center_x": 139.0,
+      "pred_center_y": 295.0,
+      "error_px": 130.004,
+      "error_dx_px": -130.0,
+      "error_dy_px": 1.0,
+      "classification": "tp",
+      "confidence": "medium"
+    },
+    {
+      "backend": "auto",
+      "case_id": "pos-agent_text_field",
+      "query": "input field labeled \"agent_text_field textarea\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 0.642,
+      "status": "ok",
+      "label": "agent_text_field textarea",
+      "kind": "textarea",
+      "expected_center_x": 269.0,
+      "expected_center_y": 385.0,
+      "pred_center_x": 153.0,
+      "pred_center_y": 328.0,
+      "error_px": 129.248,
+      "error_dx_px": -116.0,
+      "error_dy_px": -57.0,
+      "classification": "tp",
+      "confidence": "medium"
+    },
+    {
+      "backend": "auto",
+      "case_id": "pos-focus_agent_input",
+      "query": "button labeled \"Focus agent_input\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 0.575,
+      "status": "ok",
+      "label": "Focus agent_input",
+      "kind": "button",
+      "expected_center_x": 153.5,
+      "expected_center_y": 231.0,
+      "pred_center_x": 154.0,
+      "pred_center_y": 231.0,
+      "error_px": 0.5,
+      "error_dx_px": 0.5,
+      "error_dy_px": 0.0,
+      "classification": "tp",
+      "confidence": "medium"
+    },
+    {
+      "backend": "auto",
+      "case_id": "pos-focus_agent_text_field",
+      "query": "button labeled \"Focus agent_text_field\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 0.614,
+      "status": "ok",
+      "label": "Focus agent_text_field",
+      "kind": "button",
+      "expected_center_x": 384.5,
+      "expected_center_y": 231.0,
+      "pred_center_x": 385.0,
+      "pred_center_y": 231.0,
+      "error_px": 0.5,
+      "error_dx_px": 0.5,
+      "error_dy_px": 0.0,
+      "classification": "tp",
+      "confidence": "medium"
+    },
+    {
+      "backend": "auto",
+      "case_id": "pos-nav_density",
+      "query": "button labeled \"Density\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 0.575,
+      "status": "ok",
+      "label": "Density",
+      "kind": "nav-link",
+      "expected_center_x": 415.914,
+      "expected_center_y": 20.0,
+      "pred_center_x": 419.0,
+      "pred_center_y": 19.0,
+      "error_px": 3.244,
+      "error_dx_px": 3.086,
+      "error_dy_px": -1.0,
+      "classification": "tp",
+      "confidence": "medium"
+    },
+    {
+      "backend": "auto",
+      "case_id": "pos-nav_dynamic",
+      "query": "button labeled \"Dynamic\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 0.543,
+      "status": "ok",
+      "label": "Dynamic",
+      "kind": "nav-link",
+      "expected_center_x": 481.758,
+      "expected_center_y": 20.0,
+      "pred_center_x": 483.0,
+      "pred_center_y": 19.0,
+      "error_px": 1.595,
+      "error_dx_px": 1.242,
+      "error_dy_px": -1.0,
+      "classification": "tp",
+      "confidence": "medium"
+    },
+    {
+      "backend": "auto",
+      "case_id": "pos-nav_forms",
+      "query": "button labeled \"Forms\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 0.572,
+      "status": "ok",
+      "label": "Forms",
+      "kind": "nav-link",
+      "expected_center_x": 245.672,
+      "expected_center_y": 20.0,
+      "pred_center_x": 247.0,
+      "pred_center_y": 19.0,
+      "error_px": 1.662,
+      "error_dx_px": 1.328,
+      "error_dy_px": -1.0,
+      "classification": "tp",
+      "confidence": "medium"
+    },
+    {
+      "backend": "auto",
+      "case_id": "pos-nav_grid__easy_",
+      "query": "button labeled \"Grid (Easy)\"",
+      "expected_found": true,
+      "found": true,
+      "elapsed_s": 0.616,
+      "status": "ok",
+      "label": "Grid (Easy)",
+      "kind": "nav-link",
+      "expected_center_x": 176.586,
+      "expected_center_y": 20.0,
+      "pred_center_x": 179.0,
+      "pred_center_y": 19.0,
+      "error_px": 2.613,
+      "error_dx_px": 2.414,
+      "error_dy_px": -1.0,
+      "classification": "tp",
+      "confidence": "medium"
+    },
+    {
+      "backend": "auto",
+      "case_id": "neg-no-such-grid-button",
+      "query": "button labeled \"OBSIDIAN BANANA\"",
+      "expected_found": false,
+      "found": false,
+      "elapsed_s": 0.0,
+      "status": "ok",
+      "label": null,
+      "kind": null,
+      "classification": "tn",
+      "backend_error": "Element not found by auto backend chain",
+      "backend_note": "Tried: florence2, falcon, sam31, moondream"
+    },
+    {
+      "backend": "auto",
+      "case_id": "neg-no-such-icon-button",
+      "query": "icon button labeled \"Teleport\"",
+      "expected_found": false,
+      "found": false,
+      "elapsed_s": 0.0,
+      "status": "ok",
+      "label": null,
+      "kind": null,
+      "classification": "tn",
+      "backend_error": "Element not found by auto backend chain",
+      "backend_note": "Tried: florence2, falcon, sam31, moondream"
+    },
+    {
+      "backend": "auto",
+      "case_id": "neg-no-such-input",
+      "query": "input field named \"ghost_field\"",
+      "expected_found": false,
+      "found": false,
+      "elapsed_s": 0.0,
+      "status": "ok",
+      "label": null,
+      "kind": null,
+      "classification": "tn",
+      "backend_error": "Element not found by auto backend chain",
+      "backend_note": "Tried: florence2, falcon, sam31, moondream"
+    }
+  ]
+}
