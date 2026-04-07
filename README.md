@@ -359,11 +359,11 @@ Artifacts:
 - `bench/results/matrix-20260407-four-models/fixture.json`
 - Repro runbook: `bench/README.md`
 
-Recommended local backend chain for this environment: `florence2` → `falcon` → `sam31` → `moondream`.
+Recommended local backend chain for this environment: `florence2` → `falcon` → `sam31` (keep `moondream` as an opt-in manual backend for hard recall cases).
 
 Default is now configurable via:
 - `VNC_VISION_BACKEND_DEFAULT=auto` (default)
-- `VNC_VISION_BACKEND_CHAIN=florence2,falcon,sam31,moondream`
+- `VNC_VISION_BACKEND_CHAIN=florence2,falcon,sam31`
 
 You can still force a specific backend at runtime, for example:
 

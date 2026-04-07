@@ -2465,7 +2465,7 @@ VNC_VISION_ALLOW_MODEL_DOWNLOAD = os.environ.get("VNC_VISION_ALLOW_MODEL_DOWNLOA
 VNC_VISION_BACKEND_DEFAULT = os.environ.get("VNC_VISION_BACKEND_DEFAULT", "auto")
 VNC_VISION_BACKEND_CHAIN = os.environ.get(
     "VNC_VISION_BACKEND_CHAIN",
-    "florence2,falcon,sam31,moondream",
+    "florence2,falcon,sam31",
 )
 
 def cmd_click_element(args, config):

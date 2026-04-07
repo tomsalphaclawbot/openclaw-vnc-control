@@ -7,10 +7,11 @@ Reference for `vnc-control.py` detection backends used by `click_element`, `find
 Default backend mode is now **auto**:
 
 - `VNC_VISION_BACKEND_DEFAULT=auto`
-- `VNC_VISION_BACKEND_CHAIN=florence2,falcon,sam31,moondream`
+- `VNC_VISION_BACKEND_CHAIN=florence2,falcon,sam31`
 
-So the system tries the strongest local backends first, then falls back.
-You can still force a specific backend with `--backend <name>`.
+So the system tries the strongest local backends first.
+`moondream` remains available as an explicit/manual backend for hard recall cases, but it is excluded from default auto-chain due no-click false-positive risk observed in live desktop checks.
+You can still force a specific backend with `--backend <name>`. 
 
 ## Supported backends
 
