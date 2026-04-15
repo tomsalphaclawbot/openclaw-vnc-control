@@ -8,6 +8,7 @@ Backends:
 - florence2 (optional local HF backend)
 - falcon (optional local HF backend)
 - sam31 (optional local MLX backend)
+- omniparserv2 (OmniParser v2 weights: YOLO detect + Florence caption match)
 - sam2 (legacy placeholder; not text-grounded in this harness)
 
 Outputs written to --out-dir:
@@ -403,6 +404,54 @@ def probe_backend(
             "SAM3.1 dependencies/model available" + (" (cached)" if cached else " (download allowed)"),
             dry_run,
             [],
+        )
+
+    if backend == "omniparserv2":
+        try:
+            import ultralytics  # noqa: F401
+            import transformers  # noqa: F401
+            import torch  # noqa: F401
+            import pytesseract  # noqa: F401
+        except Exception as exc:
+            return Probe(
+                backend,
+                False,
+                "missing_dependency",
+                f"OmniParser v2 backend requires ultralytics + transformers + torch + pytesseract: {exc}",
+                dry_run,
+                [
+                    "python3 -m pip install ultralytics pytesseract",
+                    dry_run,
+                ],
+            )
+
+        model_dir = Path(os.environ.get("OMNIPARSER_V2_MODEL_DIR", "")).resolve() if os.environ.get("OMNIPARSER_V2_MODEL_DIR") else None
+        if model_dir is None:
+            model_dir = (fixture_path.parent.parent / "models" / "omniparser-v2.0").resolve()
+
+        detect_model = model_dir / "icon_detect" / "model.pt"
+        caption_model = model_dir / "icon_caption"
+
+        if detect_model.exists() and caption_model.exists():
+            return Probe(
+                backend,
+                True,
+                "ok",
+                f"OmniParser v2 weights present at {model_dir}",
+                dry_run,
+                [],
+            )
+
+        return Probe(
+            backend,
+            False,
+            "missing_model",
+            f"OmniParser v2 weights not found at {model_dir}",
+            dry_run,
+            [
+                "hf download microsoft/OmniParser-v2.0 --local-dir bench/models/omniparser-v2.0",
+                dry_run,
+            ],
         )
 
     if backend == "sam2":
@@ -841,6 +890,240 @@ def run_sam31_detector(
     }
 
 
+def _tokenize_text(s: str) -> list[str]:
+    cleaned = re.sub(r"[^a-z0-9]+", " ", (s or "").lower())
+    return [tok for tok in cleaned.split() if tok]
+
+
+def _match_score(label: str, candidate: str) -> float:
+    label_tokens = _tokenize_text(label)
+    cand_tokens = _tokenize_text(candidate)
+    if not label_tokens or not cand_tokens:
+        return 0.0
+
+    label_joined = "".join(label_tokens)
+    cand_joined = "".join(cand_tokens)
+    overlap = len(set(label_tokens).intersection(set(cand_tokens))) / float(len(set(label_tokens)))
+
+    bonus = 0.0
+    if label_joined and label_joined in cand_joined:
+        bonus += 0.5
+    if len(label_tokens) >= 2 and all(tok in cand_tokens for tok in label_tokens):
+        bonus += 0.35
+
+    return min(1.0, overlap + bonus)
+
+
+def run_omniparserv2_detector(
+    image_path: Path,
+    query: str,
+    state: dict[str, Any],
+    model_dir: Path,
+    conf_threshold: float,
+) -> dict[str, Any]:
+    from PIL import Image
+    from ultralytics import YOLO
+    from transformers import AutoModelForCausalLM, AutoProcessor
+    import torch
+
+    # Prevent noisy tokenizer fork warnings when OCR invokes subprocesses.
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+    model_dir = model_dir.resolve()
+    detect_model_path = model_dir / "icon_detect" / "model.pt"
+    caption_model_path = model_dir / "icon_caption"
+
+    if "runtime" not in state:
+        if not detect_model_path.exists():
+            return {
+                "found": False,
+                "backend": "omniparserv2",
+                "error": f"Missing icon detect model: {detect_model_path}",
+            }
+        if not caption_model_path.exists():
+            return {
+                "found": False,
+                "backend": "omniparserv2",
+                "error": f"Missing icon caption model dir: {caption_model_path}",
+            }
+
+        yolo = YOLO(str(detect_model_path))
+        processor = AutoProcessor.from_pretrained("microsoft/Florence-2-base", trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(str(caption_model_path), trust_remote_code=True)
+        device = "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"
+        model = model.to(device).eval()
+        state["runtime"] = {
+            "yolo": yolo,
+            "processor": processor,
+            "model": model,
+            "device": device,
+        }
+
+    runtime = state["runtime"]
+    yolo = runtime["yolo"]
+    processor = runtime["processor"]
+    model = runtime["model"]
+    device = runtime["device"]
+
+    target = extract_labeled_text(query) or query
+    image_key = str(image_path.resolve())
+    image_cache = state.setdefault("image_cache", {})
+
+    cache_entry = image_cache.get(image_key)
+    parse_elapsed = 0.0
+    cache_hit = cache_entry is not None
+
+    if cache_entry is None:
+        img = Image.open(image_path).convert("RGB")
+        width, height = img.size
+
+        t0 = time.time()
+        pred = yolo.predict(source=img, conf=0.01, iou=0.1, verbose=False)
+        boxes = pred[0].boxes.xyxy.tolist() if pred and pred[0].boxes is not None else []
+        confs = pred[0].boxes.conf.tolist() if pred and pred[0].boxes is not None and pred[0].boxes.conf is not None else []
+
+        if not boxes:
+            elapsed_detect = time.time() - t0
+            return {
+                "found": False,
+                "backend": "omniparserv2",
+                "elapsed_s": round(elapsed_detect, 3),
+                "note": "no detections",
+            }
+
+        crops: list[Image.Image] = []
+        crop_boxes: list[tuple[float, float, float, float]] = []
+        for b in boxes:
+            x1, y1, x2, y2 = [float(v) for v in b]
+            x1 = max(0.0, min(x1, width - 1))
+            y1 = max(0.0, min(y1, height - 1))
+            x2 = max(x1 + 1.0, min(x2, width))
+            y2 = max(y1 + 1.0, min(y2, height))
+            crop_boxes.append((x1, y1, x2, y2))
+            crops.append(img.crop((int(x1), int(y1), int(x2), int(y2))))
+
+        captions: list[str] = []
+        batch_size = 24
+        for idx in range(0, len(crops), batch_size):
+            batch = crops[idx : idx + batch_size]
+            inputs = processor(text=["<CAPTION>"] * len(batch), images=batch, return_tensors="pt")
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            with torch.no_grad():
+                generated_ids = model.generate(
+                    input_ids=inputs["input_ids"],
+                    pixel_values=inputs["pixel_values"],
+                    max_new_tokens=20,
+                    num_beams=1,
+                    do_sample=False,
+                )
+            batch_caps = processor.batch_decode(generated_ids, skip_special_tokens=True)
+            captions.extend([(c or "").strip() for c in batch_caps])
+
+        detections: list[dict[str, Any]] = []
+        for i, ((x1, y1, x2, y2), cap) in enumerate(zip(crop_boxes, captions)):
+            yolo_conf = float(confs[i]) if i < len(confs) else None
+            detections.append(
+                {
+                    "box": (x1, y1, x2, y2),
+                    "caption": cap,
+                    "ocr": "",
+                    "candidate_text": cap,
+                    "yolo_conf": yolo_conf,
+                }
+            )
+
+        parse_elapsed = time.time() - t0
+        cache_entry = {
+            "detections": detections,
+            "parse_elapsed_s": parse_elapsed,
+        }
+        image_cache[image_key] = cache_entry
+
+    detections = cache_entry.get("detections", [])
+    parse_elapsed = parse_elapsed if parse_elapsed > 0 else float(cache_entry.get("parse_elapsed_s", 0.0))
+
+    match_start = time.time()
+
+    def _best_match() -> dict[str, Any] | None:
+        best_local: dict[str, Any] | None = None
+        for det in detections:
+            score = _match_score(target, det.get("candidate_text", ""))
+            if best_local is None or score > best_local["score"]:
+                best_local = {
+                    "score": score,
+                    "box": det["box"],
+                    "caption": det.get("caption", ""),
+                    "ocr": det.get("ocr", ""),
+                    "candidate_text": det.get("candidate_text", ""),
+                    "yolo_conf": det.get("yolo_conf"),
+                }
+        return best_local
+
+    best = _best_match()
+
+    # Lazy OCR fallback only when caption-only matching is weak.
+    if best and best["score"] < conf_threshold and detections:
+        try:
+            import pytesseract
+
+            img_for_ocr = Image.open(image_path).convert("RGB")
+            ranked = sorted(
+                enumerate(detections),
+                key=lambda item: _match_score(target, item[1].get("caption", "")),
+                reverse=True,
+            )
+            # Limit OCR calls to top candidates to avoid extreme latency.
+            for idx, det in ranked[:8]:
+                if det.get("ocr"):
+                    continue
+                x1, y1, x2, y2 = det["box"]
+                crop = img_for_ocr.crop((int(x1), int(y1), int(x2), int(y2)))
+                ocr_text = (pytesseract.image_to_string(crop, config="--psm 7") or "").strip().replace("\n", " ")
+                det["ocr"] = ocr_text
+                det["candidate_text"] = " ".join(part for part in [ocr_text, det.get("caption", "")] if part).strip()
+        except Exception:
+            pass
+
+        best = _best_match()
+
+    elapsed_total = (0.0 if cache_hit else parse_elapsed) + (time.time() - match_start)
+
+    if not best or best["score"] < conf_threshold:
+        return {
+            "found": False,
+            "backend": "omniparserv2",
+            "elapsed_s": round(elapsed_total, 3),
+            "confidence": round(best["score"], 3) if best else 0.0,
+            "note": "no sufficiently-matched detection",
+            "meta": {
+                "target": target,
+                "detected_boxes": len(detections),
+                "cache_hit": cache_hit,
+            },
+        }
+
+    x1, y1, x2, y2 = best["box"]
+    cx = (x1 + x2) / 2.0
+    cy = (y1 + y2) / 2.0
+    return {
+        "found": True,
+        "backend": "omniparserv2",
+        "elapsed_s": round(elapsed_total, 3),
+        "confidence": round(best["score"], 3),
+        "center": {"x": cx, "y": cy},
+        "box": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
+        "note": f"detected_boxes={len(detections)} cache_hit={int(cache_hit)}",
+        "meta": {
+            "target": target,
+            "ocr": best["ocr"],
+            "caption": best["caption"],
+            "candidate_text": best["candidate_text"],
+            "cache_hit": cache_hit,
+            "yolo_conf": best.get("yolo_conf"),
+        },
+    }
+
+
 def extract_center(result: dict[str, Any]) -> tuple[float, float] | None:
     center = result.get("center") or result.get("center_px")
     if isinstance(center, dict) and "x" in center and "y" in center:
@@ -862,6 +1145,9 @@ def run_backend_case(
     florence_model: str,
     falcon_model: str,
     sam31_model: str,
+    omniparser_state: dict[str, Any],
+    omniparser_model_dir: Path,
+    omniparser_conf_threshold: float,
     allow_model_download: bool,
     ocr_cache: dict[str, Any],
     label_ocr_postprocess: bool,
@@ -874,9 +1160,18 @@ def run_backend_case(
             result = run_florence2_detector(image_path, case.query, florence_state, florence_model, allow_model_download)
         elif backend == "sam31":
             result = run_sam31_detector(image_path, case.query, sam31_state, sam31_model, allow_model_download)
+        elif backend == "omniparserv2":
+            result = run_omniparserv2_detector(
+                image_path=image_path,
+                query=case.query,
+                state=omniparser_state,
+                model_dir=omniparser_model_dir,
+                conf_threshold=omniparser_conf_threshold,
+            )
         else:
             raise RuntimeError(f"Backend {backend} has no detector")
     except Exception as exc:
+        classification = "fn" if case.expected_found else "tn"
         return {
             "backend": backend,
             "case_id": case.case_id,
@@ -884,6 +1179,7 @@ def run_backend_case(
             "expected_found": case.expected_found,
             "status": "error",
             "found": False,
+            "classification": classification,
             "elapsed_s": round(time.time() - start, 3),
             "error": f"{exc}",
             "traceback": traceback.format_exc(limit=2),
@@ -1090,6 +1386,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--florence-model", default="microsoft/Florence-2-base-ft", help="Florence model id")
     parser.add_argument("--falcon-model", default="tiiuae/Falcon-Perception-300M", help="Falcon model id")
     parser.add_argument("--sam31-model", default="mlx-community/sam3.1-bf16", help="SAM3.1 model id")
+    parser.add_argument(
+        "--omniparser-model-dir",
+        default="bench/models/omniparser-v2.0",
+        help="Path to local OmniParser v2 model snapshot directory",
+    )
+    parser.add_argument(
+        "--omniparser-conf-threshold",
+        type=float,
+        default=0.35,
+        help="Minimum text-match score for OmniParser v2 backend",
+    )
     parser.add_argument("--gemma-endpoint", default=os.environ.get("GEMMA4_ENDPOINT", "http://127.0.0.1:8890"))
     parser.add_argument(
         "--no-label-ocr-postprocess",
@@ -1138,7 +1445,13 @@ def main() -> int:
     florence_state: dict[str, Any] = {}
     falcon_state: dict[str, Any] = {}
     sam31_state: dict[str, Any] = {}
+    omniparser_state: dict[str, Any] = {}
     ocr_cache: dict[str, Any] = {}
+
+    omniparser_model_dir = Path(args.omniparser_model_dir)
+    if not omniparser_model_dir.is_absolute():
+        omniparser_model_dir = (repo_root / omniparser_model_dir).resolve()
+    os.environ["OMNIPARSER_V2_MODEL_DIR"] = str(omniparser_model_dir)
 
     for backend in backends:
         probe = probe_backend(
@@ -1168,6 +1481,9 @@ def main() -> int:
                     florence_model=args.florence_model,
                     falcon_model=args.falcon_model,
                     sam31_model=args.sam31_model,
+                    omniparser_state=omniparser_state,
+                    omniparser_model_dir=omniparser_model_dir,
+                    omniparser_conf_threshold=args.omniparser_conf_threshold,
                     allow_model_download=args.allow_model_download,
                     ocr_cache=ocr_cache,
                     label_ocr_postprocess=not args.no_label_ocr_postprocess,
@@ -1189,6 +1505,8 @@ def main() -> int:
             "florence_model": args.florence_model,
             "falcon_model": args.falcon_model,
             "sam31_model": args.sam31_model,
+            "omniparser_model_dir": str(omniparser_model_dir),
+            "omniparser_conf_threshold": args.omniparser_conf_threshold,
             "gemma_endpoint": args.gemma_endpoint,
             "label_ocr_postprocess": not args.no_label_ocr_postprocess,
         },

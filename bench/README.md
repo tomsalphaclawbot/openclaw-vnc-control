@@ -34,6 +34,14 @@ Use the vision-stack venv (contains torch + transformers + mlx-vlm):
   --backends moondream,falcon,florence2,sam31
 ```
 
+OmniParser v2 is also available as an optional backend:
+
+```bash
+/Users/openclaw/.openclaw/workspace/.venvs/vision-stack/bin/python bench/run_benchmark_matrix.py \
+  --fixture bench/results/<run-id>/fixture.json \
+  --backends florence2,omniparserv2
+```
+
 Quick helper (four local models + standard case count):
 
 ```bash
@@ -51,3 +59,4 @@ Outputs:
 - Anthropic requires `ANTHROPIC_API_KEY`.
 - Optional local HF backends (`falcon`, `florence2`) require cached model weights unless `VNC_VISION_ALLOW_MODEL_DOWNLOAD=1` or `--allow-model-download` is used.
 - `sam31` requires `mlx_vlm` + `mlx` compatible environment.
+- OmniParser v2 is intentionally **opt-in** (available, but not selected by default helper scripts).

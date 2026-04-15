@@ -6,6 +6,10 @@ __pycache__/
 .venv/
 *.log
 
+# Benchmark artifacts / local model snapshots
+bench/models/
+bench/results/
+
 # Credentials (never commit)
 .env
 
